@@ -8,7 +8,10 @@ class CookieHelper
     {
         $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
         $originHost = is_string($origin) ? (parse_url($origin, PHP_URL_HOST) ?: '') : '';
-        $requestHost = (string)($_SERVER['HTTP_HOST'] ?? '');
+        $requestHostHeader = (string)($_SERVER['HTTP_HOST'] ?? '');
+        $requestHost = $requestHostHeader !== ''
+            ? ((string)(parse_url('//' . $requestHostHeader, PHP_URL_HOST) ?: $requestHostHeader))
+            : '';
 
         $isCrossSite = $originHost !== '' && $requestHost !== '' && strcasecmp($originHost, $requestHost) !== 0;
         $configuredSameSite = trim((string)($_ENV['COOKIE_SAMESITE'] ?? ''));
