@@ -88,6 +88,7 @@ class AuthController
             http_response_code(200);
             echo json_encode([
                 'message' => 'Login successful',
+                'token' => $jwt,
                 'user' => [
                     'id' => (int)$user['id'],
                     'first_name' => (string)($user['first_name'] ?? ''),
