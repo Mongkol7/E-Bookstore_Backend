@@ -14,8 +14,11 @@ class JwtHelper
     private static function getSecretKey()
     {
         if (self::$secretKey === null) {
-            $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-            $dotenv->load();
+            if (!isset($_ENV['JWT_SECRET'])) {
+                $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
+                $dotenv->safeLoad();
+            }
+
             self::$secretKey = $_ENV['JWT_SECRET'] ?? 'your_super_secret_key'; // Fallback for safety
         }
         return self::$secretKey;
@@ -45,3 +48,4 @@ class JwtHelper
         }
     }
 }
+
