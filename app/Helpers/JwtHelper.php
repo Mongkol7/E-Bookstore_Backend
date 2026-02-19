@@ -4,7 +4,6 @@ namespace App\Helpers;
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
-use Dotenv\Dotenv;
 
 class JwtHelper
 {
@@ -14,12 +13,8 @@ class JwtHelper
     private static function getSecretKey()
     {
         if (self::$secretKey === null) {
-            if (!isset($_ENV['JWT_SECRET'])) {
-                $dotenv = Dotenv::createImmutable(__DIR__ . '/../../');
-                $dotenv->safeLoad();
-            }
-
-            self::$secretKey = $_ENV['JWT_SECRET'] ?? 'your_super_secret_key'; // Fallback for safety
+            $envSecret = $_ENV['JWT_SECRET'] ?? getenv('JWT_SECRET') ?: null;
+            self::$secretKey = $envSecret ?: 'your_super_secret_key'; // Fallback for safety
         }
         return self::$secretKey;
     }
@@ -48,4 +43,5 @@ class JwtHelper
         }
     }
 }
+
 
