@@ -172,18 +172,21 @@ class CartController
 
         foreach ($items as $item) {
             $bookId = (int)($item['id'] ?? 0);
-            if (
-                $bookId > 0 &&
-                (
-                    !isset($item['category']) ||
-                    (string)$item['category'] === '' ||
-                    (string)$item['category'] === 'Unknown Category'
-                )
-            ) {
+            if ($bookId > 0) {
                 $book = $this->getBookForCart($bookId);
                 if ($book) {
-                    $item['category'] = (string)($book['category_name'] ?? 'Unknown Category');
+                    if (
+                        !isset($item['category']) ||
+                        (string)$item['category'] === '' ||
+                        (string)$item['category'] === 'Unknown Category'
+                    ) {
+                        $item['category'] = (string)($book['category_name'] ?? 'Unknown Category');
+                    }
+
+                    $item['stock'] = (int)($book['stock'] ?? 0);
                 }
+            } elseif (!isset($item['stock'])) {
+                $item['stock'] = 0;
             }
 
             $hydrated[] = $item;
@@ -282,6 +285,7 @@ class CartController
                     if (!isset($item['category']) || (string)$item['category'] === '') {
                         $item['category'] = (string)($book['category_name'] ?? 'Unknown Category');
                     }
+                    $item['stock'] = (int)($book['stock'] ?? 0);
                     $found = true;
                     break;
                 }
@@ -300,12 +304,14 @@ class CartController
                     'author' => (string)($book['author_name'] ?? 'Unknown Author'),
                     'category' => (string)($book['category_name'] ?? 'Unknown Category'),
                     'price' => (float)$book['price'],
+                    'stock' => (int)($book['stock'] ?? 0),
                     'quantity' => $quantity,
                     'imageUrl' => (string)($book['image'] ?? ''),
                     'added_at' => gmdate('c'),
                 ];
             }
 
+            $store['cart'] = $this->hydrateCartItems($store['cart']);
             $this->saveUserStore($ctx, $store);
             echo json_encode(['message' => 'Added to cart', 'items' => $store['cart']]);
         } catch (\Exception $e) {
@@ -345,6 +351,7 @@ class CartController
                         return;
                     }
                     $item['quantity'] = $quantity;
+                    $item['stock'] = (int)($book['stock'] ?? 0);
                     $updated = true;
                     break;
                 }
@@ -357,6 +364,7 @@ class CartController
                 return;
             }
 
+            $store['cart'] = $this->hydrateCartItems($store['cart']);
             $this->saveUserStore($ctx, $store);
             echo json_encode(['message' => 'Cart updated', 'items' => $store['cart']]);
         } catch (\Exception $e) {
