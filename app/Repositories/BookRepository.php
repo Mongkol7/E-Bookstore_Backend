@@ -9,6 +9,8 @@ class BookRepository
 {
     private $pdo;
     private ?bool $hasRatingColumn = null;
+    private ?bool $hasSalesCountColumn = null;
+    private ?bool $hasSoldColumn = null;
 
     public function __construct(PDO $pdo)
     {
@@ -34,10 +36,62 @@ class BookRepository
         return $this->hasRatingColumn;
     }
 
+    private function booksTableHasSalesCountColumn(): bool
+    {
+        if ($this->hasSalesCountColumn !== null) {
+            return $this->hasSalesCountColumn;
+        }
+
+        try {
+            $stmt = $this->pdo->prepare(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = 'books' AND column_name = 'sales_count' LIMIT 1"
+            );
+            $stmt->execute();
+            $this->hasSalesCountColumn = (bool)$stmt->fetchColumn();
+        } catch (\Exception $e) {
+            $this->hasSalesCountColumn = false;
+        }
+
+        return $this->hasSalesCountColumn;
+    }
+
+    private function booksTableHasSoldColumn(): bool
+    {
+        if ($this->hasSoldColumn !== null) {
+            return $this->hasSoldColumn;
+        }
+
+        try {
+            $stmt = $this->pdo->prepare(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = 'books' AND column_name = 'sold' LIMIT 1"
+            );
+            $stmt->execute();
+            $this->hasSoldColumn = (bool)$stmt->fetchColumn();
+        } catch (\Exception $e) {
+            $this->hasSoldColumn = false;
+        }
+
+        return $this->hasSoldColumn;
+    }
+
+    private function getSalesSelectSql(): string
+    {
+        if ($this->booksTableHasSalesCountColumn()) {
+            return ', b.sales_count as sales_count';
+        }
+
+        if ($this->booksTableHasSoldColumn()) {
+            return ', b.sold as sales_count';
+        }
+
+        return '';
+    }
+
     public function getAll(): array
     {
         $ratingSelect = $this->booksTableHasRatingColumn() ? ', b.rating as rating' : '';
-        $stmt = $this->pdo->query("SELECT b.*, a.name as author_name, c.name as category_name{$ratingSelect} FROM books b JOIN authors a ON b.author_id = a.id JOIN categories c ON b.category_id = c.id ORDER BY b.id ASC");
+        $salesSelect = $this->getSalesSelectSql();
+        $stmt = $this->pdo->query("SELECT b.*, a.name as author_name, c.name as category_name{$ratingSelect}{$salesSelect} FROM books b JOIN authors a ON b.author_id = a.id JOIN categories c ON b.category_id = c.id ORDER BY b.id ASC");
         $books = [];
         try {
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -53,7 +107,8 @@ class BookRepository
                     $row['published_date'],
                     $row['author_name'],
                     $row['category_name'],
-                    isset($row['rating']) ? (float)$row['rating'] : null
+                    isset($row['rating']) ? (float)$row['rating'] : null,
+                    isset($row['sales_count']) ? (int)$row['sales_count'] : null
                 );
             }
             return $books;
@@ -66,7 +121,8 @@ class BookRepository
     public function getById(int $id): ?BookModel
     {
         $ratingSelect = $this->booksTableHasRatingColumn() ? ', b.rating as rating' : '';
-        $stmt = $this->pdo->prepare("SELECT b.*, a.name as author_name, c.name as category_name{$ratingSelect} FROM books b JOIN authors a ON b.author_id = a.id JOIN categories c ON b.category_id = c.id WHERE b.id = :id");
+        $salesSelect = $this->getSalesSelectSql();
+        $stmt = $this->pdo->prepare("SELECT b.*, a.name as author_name, c.name as category_name{$ratingSelect}{$salesSelect} FROM books b JOIN authors a ON b.author_id = a.id JOIN categories c ON b.category_id = c.id WHERE b.id = :id");
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -86,7 +142,8 @@ class BookRepository
             $row['published_date'],
             $row['author_name'],
             $row['category_name'],
-            isset($row['rating']) ? (float)$row['rating'] : null
+            isset($row['rating']) ? (float)$row['rating'] : null,
+            isset($row['sales_count']) ? (int)$row['sales_count'] : null
         );
     }
         public function save(BookModel $book): bool{

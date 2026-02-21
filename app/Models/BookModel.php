@@ -14,9 +14,10 @@ class BookModel{
     public ?string $author_name;
     public ?string $category_name;
     public ?float $rating;
+    public ?int $sales_count;
 
     //Constructor:
-        public function __construct(?int $id, string $title, string $description, float $price, int $stock, int $author_id, int $category_id, string $image, string $published_date, ?string $author_name = null, ?string $category_name = null, ?float $rating = null){
+        public function __construct(?int $id, string $title, string $description, float $price, int $stock, int $author_id, int $category_id, string $image, string $published_date, ?string $author_name = null, ?string $category_name = null, ?float $rating = null, ?int $sales_count = null){
         $this->id = $id;
         $this->title = $title;
         $this->description = $description;
@@ -29,6 +30,7 @@ class BookModel{
         $this->author_name = $author_name;
         $this->category_name = $category_name;
         $this->rating = $rating;
+        $this->sales_count = $sales_count;
     }
 
     //Getters:
@@ -67,6 +69,9 @@ class BookModel{
     }
     public function getRating(): ?float{
         return $this->rating;
+    }
+    public function getSalesCount(): ?int{
+        return $this->sales_count;
     }
 
     //Setters:
