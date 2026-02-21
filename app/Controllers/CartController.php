@@ -100,15 +100,63 @@ class CartController
 
     private function getBookForCart(int $bookId): ?array
     {
-        $sql = "SELECT b.id, b.title, b.price, b.image, a.name AS author_name
+        $sql = "SELECT b.id, b.title, b.price, b.image, a.name AS author_name, c.name AS category_name
                 FROM books b
                 LEFT JOIN authors a ON a.id = b.author_id
+                LEFT JOIN categories c ON c.id = b.category_id
                 WHERE b.id = :id
                 LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute(['id' => $bookId]);
         $book = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $book ?: null;
+    }
+
+    private function hydrateCartItems(array $items): array
+    {
+        $hydrated = [];
+
+        foreach ($items as $item) {
+            $bookId = (int)($item['id'] ?? 0);
+            if (
+                $bookId > 0 &&
+                (
+                    !isset($item['category']) ||
+                    (string)$item['category'] === '' ||
+                    (string)$item['category'] === 'Unknown Category'
+                )
+            ) {
+                $book = $this->getBookForCart($bookId);
+                if ($book) {
+                    $item['category'] = (string)($book['category_name'] ?? 'Unknown Category');
+                }
+            }
+
+            $hydrated[] = $item;
+        }
+
+        return $hydrated;
+    }
+
+    private function hydrateOrderItems(array $items): array
+    {
+        return $this->hydrateCartItems($items);
+    }
+
+    private function hydrateOrders(array $orders): array
+    {
+        $hydrated = [];
+
+        foreach ($orders as $order) {
+            if (!is_array($order)) {
+                continue;
+            }
+
+            $order['items'] = $this->hydrateOrderItems(is_array($order['items'] ?? null) ? $order['items'] : []);
+            $hydrated[] = $order;
+        }
+
+        return $hydrated;
     }
 
     private function normalizeShippingAddress(array $payload): array
@@ -132,6 +180,8 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
+            $store['cart'] = $this->hydrateCartItems($store['cart']);
+            $this->saveUserStore($ctx, $store);
             echo json_encode([
                 'items' => $store['cart'],
                 'user_type' => $ctx['user_type'],
@@ -169,6 +219,9 @@ class CartController
             foreach ($store['cart'] as &$item) {
                 if ((int)($item['id'] ?? 0) === $bookId) {
                     $item['quantity'] = max(1, (int)($item['quantity'] ?? 1) + $quantity);
+                    if (!isset($item['category']) || (string)$item['category'] === '') {
+                        $item['category'] = (string)($book['category_name'] ?? 'Unknown Category');
+                    }
                     $found = true;
                     break;
                 }
@@ -180,6 +233,7 @@ class CartController
                     'id' => (int)$book['id'],
                     'title' => (string)$book['title'],
                     'author' => (string)($book['author_name'] ?? 'Unknown Author'),
+                    'category' => (string)($book['category_name'] ?? 'Unknown Category'),
                     'price' => (float)$book['price'],
                     'quantity' => $quantity,
                     'imageUrl' => (string)($book['image'] ?? ''),
@@ -272,6 +326,7 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
+            $store['cart'] = $this->hydrateCartItems($store['cart']);
             $items = $store['cart'];
 
             if (count($items) === 0) {
@@ -332,6 +387,8 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
+            $store['orders'] = $this->hydrateOrders($store['orders']);
+            $this->saveUserStore($ctx, $store);
             echo json_encode(['orders' => $store['orders']]);
         } catch (\Exception $e) {
             http_response_code(400);
@@ -345,6 +402,8 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
+            $store['orders'] = $this->hydrateOrders($store['orders']);
+            $this->saveUserStore($ctx, $store);
             foreach ($store['orders'] as $order) {
                 if ((string)($order['id'] ?? '') === (string)$orderId) {
                     echo json_encode(['order' => $order]);
