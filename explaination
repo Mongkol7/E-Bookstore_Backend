@@ -1,219 +1,161 @@
-# E-Bookstore System Explanation (Frontend to Backend)
+# E-Bookstore System Explanation (Frontend -> Backend)
 
-This document explains how your system works end-to-end in simple terms.
+This explains the current full flow with your latest updates.
 
-## 1. Big Picture Architecture
+## 1. Architecture
 
-Your app has 3 layers:
+1. Frontend: React + Vite (`frontend/`) on Vercel
+- URL: `https://e-bookstore-one.vercel.app`
 
-1. Frontend (React + Vite)
-- Folder: `frontend/`
-- Shows pages (Home, Login, Signup, Cart, Checkout, Orders)
-- Sends HTTP requests to backend API
+2. Backend API: PHP on Railway
+- Entry: `public/index.php`
+- URL: `https://e-bookstorebackend-production.up.railway.app`
 
-2. Backend API (PHP)
-- Entry point: `public/index.php`
-- Router: `routes/web.php`
-- Business logic: `app/Controllers/*`
-- Data access: `app/Repositories/*`
+3. Database: Supabase PostgreSQL
+- Main data: users, books, JSON cart/orders, stock/sales
 
-3. Database (Supabase PostgreSQL)
-- Stores users, books, and order/cart history
+Flow:
+`Browser -> Frontend (Vercel) -> API (Railway) -> Supabase -> API -> Browser`
 
-Data flow is:
-`Browser -> React frontend -> PHP API -> Supabase PostgreSQL -> PHP API -> React UI`
+## 2. Env Setup (Production)
 
-## 2. Frontend Request Flow
+### Frontend (Vercel)
+- `VITE_API_BASE_URL=https://e-bookstorebackend-production.up.railway.app`
 
-### 2.1 API base URL
-Frontend uses:
-- `VITE_API_BASE_URL` from `frontend/.env`
+### Backend (Railway)
+- `DB_DRIVER=pgsql`
+- `DB_HOST=aws-1-ap-northeast-1.pooler.supabase.com`
+- `DB_PORT=5432`
+- `DB_DATABASE=postgres`
+- `DB_USERNAME=...`
+- `DB_PASSWORD=...`
+- `DB_SSLMODE=require`
+- `JWT_SECRET=...`
+- `CORS_ALLOWED_ORIGINS=http://localhost:5173,https://e-bookstore-one.vercel.app`
+- `CORS_ALLOW_VERCEL_PREVIEWS=true`
+- `COOKIE_SAMESITE=None`
+- `COOKIE_PATH=/`
+- `COOKIE_DOMAIN=`
 
-Current local value:
-- `VITE_API_BASE_URL=http://localhost:3000`
+## 3. Authentication
 
-So when frontend calls `/api/books`, it actually requests:
-- `http://localhost:3000/api/books`
+Auth mode now:
+- Primary: `Authorization: Bearer <token>`
+- Fallback: `auth_token` cookie
 
-### 2.2 Routing on frontend
-Frontend routes are in `frontend/src/App.jsx`:
-- `/` Home
-- `/login` Login
-- `/signup` Signup
-- `/cart` Cart
-- `/checkout` Checkout
-- `/orders` Orders list
-- `/orders/:orderId` Order detail
+### Login
+`POST /api/login`
+- Validates customer/admin credentials
+- Returns JSON: `message`, `token`, `user`
+- Also sets cookie fallback
 
-Each page makes API calls using `fetch(..., { credentials: 'include' })`.
+### Frontend token storage
+- `Remember me` checked -> `localStorage`
+- unchecked -> `sessionStorage`
 
-Why `credentials: 'include'` matters:
-- It allows browser to send the auth cookie (`auth_token`) with requests.
+### Middleware validation order
+1. Bearer token
+2. Cookie
 
-## 3. Backend Request Flow
+### Logout
+`POST /api/logout`
+- clears cookie backend-side
+- frontend clears local/session auth state
 
-### 3.1 Entry point (`public/index.php`)
-When request reaches backend:
-1. CORS headers are applied
-2. OPTIONS preflight is handled
-3. Request is passed to `routes/web.php`
+## 4. Homepage Behavior
 
-### 3.2 Router (`routes/web.php`)
-Router checks URL path and method, then maps to controller methods.
-
-Examples:
-- `GET /api/books` -> `BookController::getAllBooks()`
-- `POST /api/login` -> `AuthController::login()`
-- `GET /api/cart` -> `CartController::getCart()` (protected)
-
-Protected routes call:
-- `AuthMiddleware::authenticate()`
-
-This middleware verifies JWT from cookie and sets user context in `$_SERVER['user']`.
-
-## 4. Authentication Process
-
-### 4.1 Signup
-Frontend (`/signup`) sends:
-- `POST /api/customers/post`
-- fields: first_name, last_name, email, phone, address, password
-
-Backend:
-1. Validates input
-2. Hashes password (`password_hash`)
-3. Inserts customer into database
-
-### 4.2 Login
-Frontend (`/login`) sends:
-- `POST /api/login`
-- fields: email, password
-
-Backend (`AuthController::login`):
-1. Finds matching user in customers/admins
-2. Verifies password (hashed and legacy support)
-3. Updates last_login
-4. Creates JWT
-5. Sets `auth_token` cookie (HttpOnly)
-6. Returns user profile summary
-
-### 4.3 Profile
-Frontend requests:
-- `GET /api/auth/profile`
-
-Backend:
-1. Middleware checks cookie
-2. Loads user from DB
-3. Returns id, name, role, email, phone, address
-
-### 4.4 Logout
-Frontend sends:
-- `POST /api/logout`
-
-Backend clears `auth_token` cookie.
-
-## 5. Books Process
-
-### 5.1 Load books on homepage
-Frontend (`Homepage`) calls:
+Homepage books come from:
 - `GET /api/books`
 
-Backend (`BookController` + `BookRepository`):
-1. Reads books + joins author/category
-2. Returns JSON array
+Each card now shows:
+- Title
+- Author
+- Category
+- Description
+- Stock
+- Sales
+- Rating
 
-Frontend displays:
-- title, author, price, stock, description, rating, image
+### Search + Filter
+- Search box supports matching by:
+  - book name
+  - author
+  - category
+- Search scope options:
+  - All
+  - Book Name
+  - Author
+  - Category
+- Sorting filter options:
+  - Categories
+  - Authors
+  - Price
+  - Trending (Most Sales)
+- Search highlights matched text in card fields.
 
-## 6. Cart and Order Process
+### Loading UX
+- Skeleton loaders are used for loading states.
 
-### 6.1 Add to cart
-Frontend button sends:
-- `POST /api/cart/add`
-- payload: `book_id`, `quantity`
+## 5. Cart + Orders
 
-Backend (`CartController`):
-1. Validates authenticated user
-2. Reads user JSON store from DB
-3. Loads book info
-4. Adds or updates quantity in `cart`
-5. Saves back JSONB
-
-### 6.2 View/update/remove cart
+### Cart endpoints
 - `GET /api/cart`
+- `POST /api/cart/add`
 - `PUT /api/cart/quantity`
 - `DELETE /api/cart/remove`
 
-All require auth cookie.
-
-### 6.3 Checkout
-Frontend sends:
+### Checkout
 - `POST /api/cart/checkout`
-- includes shipping address + payment label
 
-Backend:
-1. Reads cart items
-2. Calculates subtotal, tax, shipping, total
-3. Creates order object
-4. Moves data: cart -> orders
-5. Clears cart
-6. Saves in JSONB
+### Orders
+- `GET /api/orders`
+- `GET /api/orders/:orderId`
 
-### 6.4 Order history
-Frontend calls:
-- `GET /api/orders` (list)
-- `GET /api/orders/{orderId}` (details)
+### Category hydration (important)
+Old JSON cart/order items may not contain category.
+Backend now hydrates missing category from `books + categories` during reads.
 
-Backend returns orders from JSONB per user.
+## 6. Dynamic Stock and Sales
 
-## 7. How Data is Stored
+On checkout backend now:
+1. Validates requested quantity against current stock for each item
+2. Runs DB transaction
+3. Deducts stock from `books.stock`
+4. Increments sales (`books.sales_count` or fallback `books.sold`)
+5. Saves order and clears cart
 
-Main tables used:
-- `books`
-- `customers`
-- `admins`
+If any item fails stock check, transaction is rolled back.
 
-Order/cart persistence currently uses JSONB columns:
-- `customers.order_history`
-- `admins.processed_orders`
+## 7. Why Sales Might Still Show 0
 
-Normalized JSON shape:
+If sales is still zero after deploy, usually one of these:
+1. Railway running old backend deployment
+2. Books table has no `sales_count` or `sold` column
+3. Column exists but values are all 0 and no new checkout happened yet
 
-```json
-{
-  "cart": [],
-  "orders": []
-}
+Recommended SQL:
+
+```sql
+ALTER TABLE books ADD COLUMN IF NOT EXISTS sales_count INTEGER NOT NULL DEFAULT 0;
+SELECT id, title, stock, sales_count FROM books ORDER BY id;
 ```
 
-## 8. Why "Unable to connect to server" Happens
+Then place a real checkout to verify auto-increment.
 
-This error means frontend cannot reach backend URL.
+## 8. Quick Verification Checklist
 
-Common local causes:
-1. Backend not running (`php -S localhost:3000 -t public` not started)
-2. Wrong frontend API base URL in `frontend/.env`
-3. CORS/domain mismatch (more common in deployment)
+1. API health:
+- `GET /api/books` returns JSON with `category_name` and `sales_count`
 
-For local dev, minimum required:
-1. Backend running on `http://localhost:3000`
-2. `frontend/.env` has `VITE_API_BASE_URL=http://localhost:3000`
-3. Frontend dev server restarted
+2. Auth:
+- login returns `token`
+- protected pages still work after refresh
 
-## 9. End-to-End Example (Login -> Add to Cart -> Checkout)
+3. Cart/Orders:
+- category appears in cart items and order detail items
 
-1. User opens `/login`
-2. Frontend sends `POST /api/login`
-3. Backend validates and sets auth cookie
-4. User goes homepage `/`
-5. Frontend calls `GET /api/books` and renders cards
-6. User clicks Add to Cart
-7. Frontend calls `POST /api/cart/add`
-8. Backend stores item in user JSON cart
-9. User opens `/cart`, frontend calls `GET /api/cart`
-10. User clicks checkout, frontend posts to `/api/cart/checkout`
-11. Backend creates order, clears cart
-12. User sees order history from `/api/orders`
+4. Inventory:
+- checkout reduces stock and increases sales
 
----
-
-If you want, I can also make a second document with simple diagrams (request/response sequence) for each page.
+5. Frontend:
+- search + search-scope + highlight work correctly
