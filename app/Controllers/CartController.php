@@ -5,6 +5,7 @@ namespace App\Controllers;
 class CartController
 {
     private $pdo;
+    private ?string $salesColumn = null;
 
     public function __construct()
     {
@@ -122,6 +123,47 @@ class CartController
         ]);
 
         return $stmt->rowCount() > 0;
+    }
+
+    private function resolveSalesColumn(): ?string
+    {
+        if ($this->salesColumn !== null) {
+            return $this->salesColumn;
+        }
+
+        try {
+            $stmt = $this->pdo->query(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'books' AND column_name IN ('sales_count','sold')"
+            );
+            $columns = $stmt ? $stmt->fetchAll(\PDO::FETCH_COLUMN) : [];
+            if (in_array('sales_count', $columns, true)) {
+                $this->salesColumn = 'sales_count';
+                return $this->salesColumn;
+            }
+            if (in_array('sold', $columns, true)) {
+                $this->salesColumn = 'sold';
+                return $this->salesColumn;
+            }
+        } catch (\Exception $e) {
+            // Ignore schema lookup errors and fallback to no sales update.
+        }
+
+        return null;
+    }
+
+    private function increaseBookSales(int $bookId, int $quantity): void
+    {
+        $salesColumn = $this->resolveSalesColumn();
+        if ($salesColumn === null) {
+            return;
+        }
+
+        $sql = "UPDATE books SET {$salesColumn} = COALESCE({$salesColumn}, 0) + :quantity WHERE id = :id";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            'id' => $bookId,
+            'quantity' => $quantity,
+        ]);
     }
 
     private function hydrateCartItems(array $items): array
@@ -434,6 +476,7 @@ class CartController
                     echo json_encode(['error' => "Insufficient stock for {$item['title']}"]);
                     return;
                 }
+                $this->increaseBookSales($bookId, $quantity);
             }
 
             array_unshift($store['orders'], $order);
