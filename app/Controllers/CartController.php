@@ -100,7 +100,7 @@ class CartController
 
     private function getBookForCart(int $bookId): ?array
     {
-        $sql = "SELECT b.id, b.title, b.price, b.image, a.name AS author_name, c.name AS category_name
+        $sql = "SELECT b.id, b.title, b.price, b.stock, b.image, a.name AS author_name, c.name AS category_name
                 FROM books b
                 LEFT JOIN authors a ON a.id = b.author_id
                 LEFT JOIN categories c ON c.id = b.category_id
@@ -110,6 +110,18 @@ class CartController
         $stmt->execute(['id' => $bookId]);
         $book = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $book ?: null;
+    }
+
+    private function reduceBookStock(int $bookId, int $quantity): bool
+    {
+        $sql = "UPDATE books SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            'id' => $bookId,
+            'quantity' => $quantity,
+        ]);
+
+        return $stmt->rowCount() > 0;
     }
 
     private function hydrateCartItems(array $items): array
@@ -218,7 +230,13 @@ class CartController
             $found = false;
             foreach ($store['cart'] as &$item) {
                 if ((int)($item['id'] ?? 0) === $bookId) {
-                    $item['quantity'] = max(1, (int)($item['quantity'] ?? 1) + $quantity);
+                    $newQuantity = max(1, (int)($item['quantity'] ?? 1) + $quantity);
+                    if ($newQuantity > (int)($book['stock'] ?? 0)) {
+                        http_response_code(400);
+                        echo json_encode(['error' => 'Requested quantity exceeds available stock']);
+                        return;
+                    }
+                    $item['quantity'] = $newQuantity;
                     if (!isset($item['category']) || (string)$item['category'] === '') {
                         $item['category'] = (string)($book['category_name'] ?? 'Unknown Category');
                     }
@@ -229,6 +247,11 @@ class CartController
             unset($item);
 
             if (!$found) {
+                if ($quantity > (int)($book['stock'] ?? 0)) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Requested quantity exceeds available stock']);
+                    return;
+                }
                 $store['cart'][] = [
                     'id' => (int)$book['id'],
                     'title' => (string)$book['title'],
@@ -268,6 +291,17 @@ class CartController
             $updated = false;
             foreach ($store['cart'] as &$item) {
                 if ((int)($item['id'] ?? 0) === $bookId) {
+                    $book = $this->getBookForCart($bookId);
+                    if (!$book) {
+                        http_response_code(404);
+                        echo json_encode(['error' => 'Book not found']);
+                        return;
+                    }
+                    if ($quantity > (int)($book['stock'] ?? 0)) {
+                        http_response_code(400);
+                        echo json_encode(['error' => 'Requested quantity exceeds available stock']);
+                        return;
+                    }
                     $item['quantity'] = $quantity;
                     $updated = true;
                     break;
@@ -335,6 +369,29 @@ class CartController
                 return;
             }
 
+            foreach ($items as $item) {
+                $bookId = (int)($item['id'] ?? 0);
+                $quantity = (int)($item['quantity'] ?? 0);
+                if ($bookId <= 0 || $quantity <= 0) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Invalid cart item']);
+                    return;
+                }
+
+                $book = $this->getBookForCart($bookId);
+                if (!$book) {
+                    http_response_code(404);
+                    echo json_encode(['error' => "Book not found for cart item #{$bookId}"]);
+                    return;
+                }
+
+                if ($quantity > (int)($book['stock'] ?? 0)) {
+                    http_response_code(400);
+                    echo json_encode(['error' => "Insufficient stock for {$book['title']}"]);
+                    return;
+                }
+            }
+
             $subtotal = 0.0;
             foreach ($items as $item) {
                 $subtotal += (float)($item['price'] ?? 0) * (int)($item['quantity'] ?? 0);
@@ -367,15 +424,31 @@ class CartController
                 ],
             ];
 
+            $this->pdo->beginTransaction();
+            foreach ($items as $item) {
+                $bookId = (int)($item['id'] ?? 0);
+                $quantity = (int)($item['quantity'] ?? 0);
+                if (!$this->reduceBookStock($bookId, $quantity)) {
+                    $this->pdo->rollBack();
+                    http_response_code(400);
+                    echo json_encode(['error' => "Insufficient stock for {$item['title']}"]);
+                    return;
+                }
+            }
+
             array_unshift($store['orders'], $order);
             $store['cart'] = [];
             $this->saveUserStore($ctx, $store);
+            $this->pdo->commit();
 
             echo json_encode([
                 'message' => 'Order placed successfully',
                 'order' => $order,
             ]);
         } catch (\Exception $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
             http_response_code(400);
             echo json_encode(['error' => $e->getMessage()]);
         }
