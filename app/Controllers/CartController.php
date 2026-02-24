@@ -2,8 +2,6 @@
 
 namespace App\Controllers;
 
-use App\Helpers\MailHelper;
-
 class CartController
 {
     private $pdo;
@@ -231,6 +229,41 @@ class CartController
             'phone' => (string)($input['phone'] ?? ''),
             'email' => (string)($input['email'] ?? ''),
         ];
+    }
+
+    private function enqueuePurchaseAlert(array $order, array $ctx): ?int
+    {
+        $payload = json_encode([
+            'order' => $order,
+            'ctx' => [
+                'user_type' => (string)($ctx['user_type'] ?? 'unknown'),
+                'user_id' => (int)($ctx['user_id'] ?? 0),
+            ],
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        if ($payload === false) {
+            throw new \RuntimeException('Failed to encode purchase alert payload');
+        }
+
+        $sql = "INSERT INTO purchase_alert_outbox
+                (order_id, order_number, user_type, user_id, payload, status, attempt_count, next_attempt_at, created_at, updated_at)
+                VALUES (:order_id, :order_number, :user_type, :user_id, :payload::jsonb, 'pending', 0, NOW(), NOW(), NOW())
+                RETURNING id";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            'order_id' => (string)($order['id'] ?? ''),
+            'order_number' => (string)($order['orderNumber'] ?? ''),
+            'user_type' => (string)($ctx['user_type'] ?? 'unknown'),
+            'user_id' => (int)($ctx['user_id'] ?? 0),
+            'payload' => $payload,
+        ]);
+
+        $queueId = $stmt->fetchColumn();
+        if ($queueId === false) {
+            return null;
+        }
+
+        return (int)$queueId;
     }
 
     public function getCart()
@@ -493,19 +526,20 @@ class CartController
             $this->saveUserStore($ctx, $store);
             $this->pdo->commit();
 
-            $mailStatus = 'skipped';
+            $mailStatus = 'queued';
+            $mailQueueId = null;
             try {
-                MailHelper::sendPurchaseAlert($order, $ctx);
-                $mailStatus = 'sent';
-            } catch (\Throwable $mailError) {
-                $mailStatus = 'failed';
-                error_log('[mail] Purchase alert failed: ' . $mailError->getMessage());
+                $mailQueueId = $this->enqueuePurchaseAlert($order, $ctx);
+            } catch (\Throwable $queueError) {
+                $mailStatus = 'queue_failed';
+                error_log('[mail-queue] Enqueue failed: ' . $queueError->getMessage());
             }
 
             echo json_encode([
                 'message' => 'Order placed successfully',
                 'order' => $order,
                 'mail_status' => $mailStatus,
+                'mail_queue_id' => $mailQueueId,
             ]);
         } catch (\Exception $e) {
             if ($this->pdo->inTransaction()) {
@@ -522,8 +556,8 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
-            $store['orders'] = $this->hydrateOrders($store['orders']);
-            echo json_encode(['orders' => $store['orders']]);
+            $orders = is_array($store['orders'] ?? null) ? array_values($store['orders']) : [];
+            echo json_encode(['orders' => $orders]);
         } catch (\Exception $e) {
             http_response_code(400);
             echo json_encode(['error' => $e->getMessage()]);
@@ -536,12 +570,13 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
-            $store['orders'] = $this->hydrateOrders($store['orders']);
-            foreach ($store['orders'] as $order) {
+            $orders = is_array($store['orders'] ?? null) ? array_values($store['orders']) : [];
+            foreach ($orders as $order) {
                 if (
                     (string)($order['id'] ?? '') === (string)$orderId
                     || (string)($order['orderNumber'] ?? '') === (string)$orderId
                 ) {
+                    $order['items'] = $this->hydrateOrderItems(is_array($order['items'] ?? null) ? $order['items'] : []);
                     echo json_encode(['order' => $order]);
                     return;
                 }

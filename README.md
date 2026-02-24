@@ -58,10 +58,10 @@ php -S localhost:3000 -t public
 On every successful `POST /api/cart/checkout`, the backend can send an owner alert email.
 
 Behavior:
-- Email is sent after checkout DB commit.
-- If email fails, checkout still succeeds.
-- If `MAIL_ENABLED=false`, alert is skipped.
-- If `PURCHASE_ALERT_TO` is empty, alert is skipped.
+- Checkout enqueues purchase alerts into `purchase_alert_outbox` (non-blocking).
+- Worker script sends queued emails asynchronously.
+- If sending fails, worker retries with backoff and eventually marks job as `failed`.
+- If `MAIL_ENABLED=false` or `PURCHASE_ALERT_TO` is empty, worker skips send.
 
 Required env keys:
 
@@ -78,24 +78,48 @@ PURCHASE_ALERT_TO=owner@example.com
 PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
 ```
 
+Queue migration:
+
+```bash
+# run in PostgreSQL (local + Railway)
+database/purchase_alert_outbox.sql
+```
+
+Queue worker command:
+
+```bash
+php scripts/process_purchase_alert_queue.php --limit=20 --max-attempts=6
+```
+
+Queue stats command:
+
+```bash
+php scripts/purchase_alert_queue_stats.php
+```
+
+Railway cron recommendation:
+- Command: `php scripts/process_purchase_alert_queue.php --limit=20`
+- Frequency: every minute
+
 ## Purchase Alert Test Checklist
 
 1. Place a checkout with valid SMTP credentials:
 - Expect successful order response.
-- Expect one email delivered to `PURCHASE_ALERT_TO`.
+- Expect `mail_status` = `queued` in checkout response.
+- Expect one row in outbox with `status='pending'` or quickly `status='sent'`.
 
 2. Break SMTP credentials:
 - Expect successful order response.
 - Expect no rollback of order/cart state.
-- Expect backend error log entry for failed mail send.
+- Expect worker retries and then `status='failed'` with `last_error`.
 
 3. Set `MAIL_ENABLED=false`:
 - Expect successful order response.
-- Expect no email send attempt.
+- Expect outbox job processed without outbound email.
 
 4. Keep `MAIL_ENABLED=true` but clear `PURCHASE_ALERT_TO`:
 - Expect successful order response.
-- Expect alert skip log.
+- Expect alert skip log in worker and no delivered email.
 
 ## Fly.io Deployment
 
