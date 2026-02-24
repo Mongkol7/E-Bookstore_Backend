@@ -2,6 +2,8 @@
 
 namespace App\Controllers;
 
+use App\Helpers\MailHelper;
+
 class CartController
 {
     private $pdo;
@@ -491,6 +493,12 @@ class CartController
             $store['cart'] = [];
             $this->saveUserStore($ctx, $store);
             $this->pdo->commit();
+
+            try {
+                MailHelper::sendPurchaseAlert($order, $ctx);
+            } catch (\Throwable $mailError) {
+                error_log('[mail] Purchase alert failed: ' . $mailError->getMessage());
+            }
 
             echo json_encode([
                 'message' => 'Order placed successfully',
