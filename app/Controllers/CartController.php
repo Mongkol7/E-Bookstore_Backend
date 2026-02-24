@@ -240,7 +240,6 @@ class CartController
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
             $store['cart'] = $this->hydrateCartItems($store['cart']);
-            $this->saveUserStore($ctx, $store);
             echo json_encode([
                 'items' => $store['cart'],
                 'user_type' => $ctx['user_type'],
@@ -494,16 +493,26 @@ class CartController
             $this->saveUserStore($ctx, $store);
             $this->pdo->commit();
 
+            echo json_encode([
+                'message' => 'Order placed successfully',
+                'order' => $order,
+            ]);
+
+            // Return checkout response first to keep API latency low.
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            } else {
+                if (ob_get_level() > 0) {
+                    @ob_flush();
+                }
+                @flush();
+            }
+
             try {
                 MailHelper::sendPurchaseAlert($order, $ctx);
             } catch (\Throwable $mailError) {
                 error_log('[mail] Purchase alert failed: ' . $mailError->getMessage());
             }
-
-            echo json_encode([
-                'message' => 'Order placed successfully',
-                'order' => $order,
-            ]);
         } catch (\Exception $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -520,7 +529,6 @@ class CartController
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
             $store['orders'] = $this->hydrateOrders($store['orders']);
-            $this->saveUserStore($ctx, $store);
             echo json_encode(['orders' => $store['orders']]);
         } catch (\Exception $e) {
             http_response_code(400);
@@ -535,9 +543,11 @@ class CartController
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
             $store['orders'] = $this->hydrateOrders($store['orders']);
-            $this->saveUserStore($ctx, $store);
             foreach ($store['orders'] as $order) {
-                if ((string)($order['id'] ?? '') === (string)$orderId) {
+                if (
+                    (string)($order['id'] ?? '') === (string)$orderId
+                    || (string)($order['orderNumber'] ?? '') === (string)$orderId
+                ) {
                     echo json_encode(['order' => $order]);
                     return;
                 }

@@ -74,7 +74,7 @@ class MailHelper
         $mail->isSMTP();
         $mail->Host = $host;
         $mail->Port = self::envInt('MAIL_PORT', 587);
-        $mail->Timeout = 10;
+        $mail->Timeout = max(1, self::envInt('MAIL_TIMEOUT', 3));
         $mail->CharSet = 'UTF-8';
 
         $encryption = strtolower(self::envString('MAIL_ENCRYPTION', 'tls'));
