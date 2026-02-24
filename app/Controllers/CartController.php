@@ -493,26 +493,20 @@ class CartController
             $this->saveUserStore($ctx, $store);
             $this->pdo->commit();
 
+            $mailStatus = 'skipped';
+            try {
+                MailHelper::sendPurchaseAlert($order, $ctx);
+                $mailStatus = 'sent';
+            } catch (\Throwable $mailError) {
+                $mailStatus = 'failed';
+                error_log('[mail] Purchase alert failed: ' . $mailError->getMessage());
+            }
+
             echo json_encode([
                 'message' => 'Order placed successfully',
                 'order' => $order,
+                'mail_status' => $mailStatus,
             ]);
-
-            // Return checkout response first to keep API latency low.
-            if (function_exists('fastcgi_finish_request')) {
-                fastcgi_finish_request();
-            } else {
-                if (ob_get_level() > 0) {
-                    @ob_flush();
-                }
-                @flush();
-            }
-
-            try {
-                MailHelper::sendPurchaseAlert($order, $ctx);
-            } catch (\Throwable $mailError) {
-                error_log('[mail] Purchase alert failed: ' . $mailError->getMessage());
-            }
         } catch (\Exception $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
