@@ -20,7 +20,9 @@ $stmt = $pdo->query(
         COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
         COUNT(*) FILTER (WHERE status = 'sent') AS sent_count,
         COALESCE(
-            EXTRACT(EPOCH FROM (NOW() - MIN(next_attempt_at))) FILTER (WHERE status = 'pending'),
+            EXTRACT(EPOCH FROM (
+                NOW() - MIN(CASE WHEN status = 'pending' THEN next_attempt_at END)
+            )),
             0
         ) AS oldest_pending_age_seconds
      FROM purchase_alert_outbox"

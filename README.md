@@ -67,15 +67,23 @@ Required env keys:
 
 ```env
 MAIL_ENABLED=true
+MAIL_PROVIDER=auto
+MAIL_TIMEOUT=20
+MAIL_FROM_ADDRESS=no-reply@example.com
+MAIL_FROM_NAME=Ecommerce Store
+PURCHASE_ALERT_TO=owner@example.com
+PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
+
+# Recommended on Railway (HTTPS transport)
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+RESEND_API_URL=https://api.resend.com/emails
+
+# Optional SMTP fallback
 MAIL_HOST=smtp.example.com
 MAIL_PORT=587
 MAIL_ENCRYPTION=tls
 MAIL_USERNAME=your-smtp-username
 MAIL_PASSWORD=your-smtp-password
-MAIL_FROM_ADDRESS=no-reply@example.com
-MAIL_FROM_NAME=Ecommerce Store
-PURCHASE_ALERT_TO=owner@example.com
-PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
 ```
 
 Queue migration:
@@ -99,7 +107,7 @@ php scripts/purchase_alert_queue_stats.php
 
 Railway cron recommendation:
 - Command: `php scripts/process_purchase_alert_queue.php --limit=20`
-- Frequency: every minute
+- Frequency: every 5 minutes
 
 ## Purchase Alert Test Checklist
 

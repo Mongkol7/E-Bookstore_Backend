@@ -76,6 +76,11 @@ Each card now shows:
 - Sales
 - Rating
 
+### Responsive layout
+- Phone: 2 cards per row
+- iPad/tablet: 3 cards per row
+- Desktop XL: 4 cards per row
+
 ### Search + Filter
 - Search box supports matching by:
   - book name
@@ -115,6 +120,21 @@ Each card now shows:
 Old JSON cart/order items may not contain category.
 Backend now hydrates missing category from `books + categories` during reads.
 
+### Stock hydration (important)
+Cart items in stored JSON can become stale if stock changes after add-to-cart.
+Backend now refreshes stock from `books.stock` when returning cart items so frontend shows current stock.
+
+### Quantity edit + validation (frontend)
+Cart quantity is editable by typing directly, plus `+/-` buttons.
+
+Validation now shows inline error under each item quantity:
+- Empty input: `Quantity is required`
+- Non-digit input: `Please enter digits only`
+- Less than 1: `Quantity must be at least 1`
+- Greater than available stock: `Only X in stock`
+
+Invalid values are blocked from API update.
+
 ## 6. Dynamic Stock and Sales
 
 On checkout backend now:
@@ -153,9 +173,11 @@ Then place a real checkout to verify auto-increment.
 
 3. Cart/Orders:
 - category appears in cart items and order detail items
+- stock appears in cart items and reflects current DB stock
 
 4. Inventory:
 - checkout reduces stock and increases sales
 
 5. Frontend:
 - search + search-scope + highlight work correctly
+- quantity edit shows validation errors for invalid input
