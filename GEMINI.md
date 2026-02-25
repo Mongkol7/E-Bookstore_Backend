@@ -49,15 +49,23 @@ COOKIE_PATH=/
 
 # Purchase alert email (owner notification)
 MAIL_ENABLED=true
+MAIL_PROVIDER=auto
+MAIL_TIMEOUT=20
+MAIL_FROM_ADDRESS=no-reply@example.com
+MAIL_FROM_NAME=Ecommerce Store
+PURCHASE_ALERT_TO=owner@example.com
+PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
+
+# Recommended transport on Railway (HTTPS)
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+RESEND_API_URL=https://api.resend.com/emails
+
+# Optional SMTP fallback transport
 MAIL_HOST=smtp.example.com
 MAIL_PORT=587
 MAIL_ENCRYPTION=tls
 MAIL_USERNAME=your-smtp-username
 MAIL_PASSWORD=your-smtp-password
-MAIL_FROM_ADDRESS=no-reply@example.com
-MAIL_FROM_NAME=Ecommerce Store
-PURCHASE_ALERT_TO=owner@example.com
-PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
 ```
 
 ### Frontend `frontend/.env`
@@ -227,10 +235,13 @@ Backward compatibility exists for legacy array-only JSON.
 - Admin/customer email lookups are case-insensitive.
 - Unified `/api/login` reduces auth round-trips.
 - Recommended DB indexes are in `database/supabase_performance.sql`.
+- Checkout no longer performs direct SMTP send in request path.
+- Purchase alerts are queued in DB and processed asynchronously by worker cron.
 
 ## Frontend Routes
 
 - `/` -> Homepage
+- `/product/:bookId` -> Product detail page
 - `/login` -> Login page
 - `/signup` -> Signup page
 - `/cart` -> Cart page
@@ -258,11 +269,11 @@ Backward compatibility exists for legacy array-only JSON.
 ### Flow B: Load homepage + books + profile
 
 1. `frontend/src/pages/Home/Homepage/index.jsx` mounts.
-2. Calls `GET /api/auth/profile`.
+2. Shared navbar (`frontend/src/components/StoreNavbar.jsx`) calls `GET /api/auth/profile`.
 3. Backend route requires `AuthMiddleware::authenticate()`.
 4. Middleware resolves token from Bearer/cookie and injects `$_SERVER['user']`.
 5. `AuthController::getProfile()` loads user through `CustomerRepository` or `AdminRepository`.
-6. Frontend updates header profile name/role.
+6. Frontend updates navbar profile name/role.
 7. Frontend calls `GET /api/books`.
 8. `BookController::getAllBooks()` -> `BookRepository::getAll()`.
 9. Repository returns books with author/category joins, optional rating/sales columns.
@@ -306,8 +317,8 @@ Backward compatibility exists for legacy array-only JSON.
 - Prepends order into orders array.
 - Clears cart.
 - Saves JSONB payload and commits.
- - After successful commit, attempts owner purchase-alert email via SMTP settings.
- - Email failures are logged only (non-blocking).
+ - After successful commit, inserts purchase-alert job into `purchase_alert_outbox`.
+ - Returns response with `mail_status: "queued"` (and optional queue id).
 6. Frontend shows success and redirects to cart/orders path.
 
 ### Flow F: Order history and order detail
@@ -318,6 +329,20 @@ Backward compatibility exists for legacy array-only JSON.
 4. Detail page calls `GET /api/orders/{orderId}`.
 5. `CartController::getOrderById()` returns exact order payload.
 6. Detail page renders timeline/items/shipping/payment blocks.
+
+### Flow G: Purchase-alert queue worker
+
+1. Railway worker service `purchase-alert-queue-worker` runs cron schedule `*/5 * * * *`.
+2. Start command:
+   `php -d variables_order=EGPCS scripts/process_purchase_alert_queue.php --limit=20 --max-attempts=6`
+3. Worker claims due jobs with `FOR UPDATE SKIP LOCKED`.
+4. For each job:
+   - sends alert email via configured provider (`MAIL_PROVIDER=auto` => Resend if key exists),
+   - marks `sent` on success,
+   - or increments attempts and schedules backoff on transient failure,
+   - marks `failed` when max attempts exceeded.
+5. Queue stats can be checked with:
+   `php scripts/purchase_alert_queue_stats.php`
 
 ## File Responsibilities (Quick Map)
 
@@ -340,6 +365,7 @@ Backward compatibility exists for legacy array-only JSON.
 - `frontend/src/utils/api.js`: API URL build + authenticated fetch.
 - `frontend/src/utils/auth.js`: token persistence/session cleanup.
 - `frontend/src/pages/...`: per-screen logic and request flow.
+- `frontend/src/components/StoreNavbar.jsx`: shared top navigation (logo, cart link, profile menu, logout modal) used across store pages.
 - `frontend/src/components/Skeleton.jsx`: loading placeholders.
 - `frontend/src/components/Footer.jsx`: global footer UI.
 
@@ -360,6 +386,18 @@ Backward compatibility exists for legacy array-only JSON.
 
 - `Invalid credentials`:
   - Ensure password is sent as a string, e.g. `"123"`.
+
+- Purchase alert rows stay `pending`/`failed`:
+  - Check worker service exists and cron is configured on `purchase-alert-queue-worker` (not API service).
+  - Check worker start command includes `-d variables_order=EGPCS`.
+  - Confirm `RESEND_API_KEY` is present on both `E-Bookstore_Backend` and `purchase-alert-queue-worker`.
+  - Confirm `MAIL_FROM_ADDRESS` is valid for your Resend account (or `onboarding@resend.dev` for test mode).
+  - Requeue failed rows after config fix:
+    `UPDATE purchase_alert_outbox SET status='pending', next_attempt_at=NOW(), updated_at=NOW() WHERE status='failed';`
+
+- `SMTP Error: Could not connect to SMTP host` on Railway:
+  - This is a provider connectivity issue (common with SMTP from cloud containers).
+  - Use HTTPS provider transport (Resend API) instead of SMTP.
 
 ## Notes
 
