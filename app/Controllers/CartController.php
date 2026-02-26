@@ -719,8 +719,9 @@ class CartController
             usort($adminRecentOrders, $sortByDateDesc);
 
             echo json_encode([
-                'all_recent_orders' => array_slice($allRecentOrders, 0, 30),
-                'admin_recent_orders' => array_slice($adminRecentOrders, 0, 30),
+                // Return full datasets so dashboard KPIs (revenue/orders by period) are accurate.
+                'all_recent_orders' => $allRecentOrders,
+                'admin_recent_orders' => $adminRecentOrders,
             ]);
         } catch (\Exception $e) {
             http_response_code(400);
