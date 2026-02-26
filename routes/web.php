@@ -339,6 +339,15 @@ if ($request_path === '') {
         http_response_code(405);
         echo json_encode(['error' => 'Method Not Allowed']);
     }
+} elseif ($request_path === '/api/admin/dashboard/orders') {
+    AuthMiddleware::authenticate();
+    $controller = new CartController();
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $controller->getAdminDashboardOrders();
+    } else {
+        http_response_code(405);
+        echo json_encode(['error' => 'Method Not Allowed']);
+    }
 } elseif ($request_path === '/api/orders') {
     AuthMiddleware::authenticate();
     $controller = new CartController();

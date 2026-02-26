@@ -153,8 +153,9 @@ If valid, decoded payload is stored in `$_SERVER['user']` for downstream control
 
 1. `frontend/src/main.jsx` mounts React app.
 2. `frontend/src/App.jsx` maps URL paths to page components.
-3. Pages call backend through `frontend/src/utils/api.js`.
-4. Auth token persistence and cleanup are handled by `frontend/src/utils/auth.js`.
+3. Route guard `frontend/src/components/AdminRoute.jsx` restricts admin-only pages.
+4. Pages call backend through `frontend/src/utils/api.js`.
+5. Auth token persistence and cleanup are handled by `frontend/src/utils/auth.js`.
 
 ## Auth Behavior (Current)
 
@@ -171,6 +172,9 @@ If valid, decoded payload is stored in `$_SERVER['user']` for downstream control
 - Backend checks customer/admin in one request
 - Frontend uses `credentials: include`
 - Token is set as `auth_token` cookie and also returned in JSON
+- Frontend redirects by role:
+  - `admin` -> `/admin/dashboard`
+  - `customer` -> `/`
 
 ### Profile / Logout
 
@@ -248,6 +252,8 @@ Backward compatibility exists for legacy array-only JSON.
 - `/checkout` -> Checkout page
 - `/orders` -> Orders list
 - `/orders/:orderId` -> Order detail page
+- `/admin/dashboard` -> Admin dashboard (admin-only)
+- `/dashboard` -> Admin dashboard alias (admin-only)
 
 ## Detailed End-to-End Sequence Flows
 
@@ -264,7 +270,9 @@ Backward compatibility exists for legacy array-only JSON.
 - JWT created by `JwtHelper`.
 - `auth_token` cookie set via `CookieHelper`.
 - JSON response includes user profile and token.
-8. Frontend stores token using `saveAuthToken()` and navigates to `/`.
+8. Frontend stores token using `saveAuthToken()` and redirects by role:
+- admin -> `/admin/dashboard`
+- customer -> `/`
 
 ### Flow B: Load homepage + books + profile
 
@@ -295,10 +303,11 @@ Backward compatibility exists for legacy array-only JSON.
 
 1. Cart page loads via `GET /api/cart`.
 2. `CartController::getCart()` hydrates item metadata (stock/category) and returns `items`.
-3. Quantity change sends `PUT /api/cart/quantity`.
-4. Controller validates quantity and stock, updates JSONB cart.
-5. Remove sends `DELETE /api/cart/remove`.
-6. Controller filters out item and persists updated cart.
+3. Quantity edits (`+`, `-`, typing) are applied in local UI state first.
+4. On `Proceed to Checkout`, frontend validates each edited quantity.
+5. Only changed quantities are synced via `PUT /api/cart/quantity`.
+6. Remove sends `DELETE /api/cart/remove`.
+7. Controller filters out item and persists updated cart.
 
 ### Flow E: Checkout
 
@@ -344,6 +353,22 @@ Backward compatibility exists for legacy array-only JSON.
 5. Queue stats can be checked with:
    `php scripts/purchase_alert_queue_stats.php`
 
+### Flow H: Admin dashboard access
+
+1. Admin logs in via `POST /api/login`.
+2. Login response includes role; frontend redirects admin to `/admin/dashboard`.
+3. Route is wrapped by `frontend/src/components/AdminRoute.jsx`.
+4. `AdminRoute` calls `GET /api/auth/profile`:
+- unauthenticated -> redirect `/login`
+- non-admin role -> redirect `/`
+- admin role -> allow access
+5. `frontend/src/pages/Dashboard/index.jsx` fetches:
+- `/api/auth/profile`
+- `/api/books`
+- `/api/orders`
+- `/api/customers`
+6. Dashboard renders KPIs, recent orders, low-stock list, and top-selling books.
+
 ## File Responsibilities (Quick Map)
 
 ### Backend
@@ -365,7 +390,9 @@ Backward compatibility exists for legacy array-only JSON.
 - `frontend/src/utils/api.js`: API URL build + authenticated fetch.
 - `frontend/src/utils/auth.js`: token persistence/session cleanup.
 - `frontend/src/pages/...`: per-screen logic and request flow.
-- `frontend/src/components/StoreNavbar.jsx`: shared top navigation (logo, cart link, profile menu, logout modal) used across store pages.
+- `frontend/src/components/AdminRoute.jsx`: frontend role guard for admin-only routes.
+- `frontend/src/components/StoreNavbar.jsx`: shared top navigation (logo, cart/profile menu/logout modal), responsive for phone/tablet, with optional reusable back button (`backTo`, `backLabel`) used across pages.
+- `frontend/src/pages/Dashboard/index.jsx`: admin analytics page powered by live API data.
 - `frontend/src/components/Skeleton.jsx`: loading placeholders.
 - `frontend/src/components/Footer.jsx`: global footer UI.
 

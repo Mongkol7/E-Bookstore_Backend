@@ -54,7 +54,12 @@ class CartController
             throw new \Exception('User not found');
         }
 
-        $decoded = json_decode($row['payload'] ?? '[]', true);
+        return $this->decodeStorePayload($row['payload'] ?? '[]');
+    }
+
+    private function decodeStorePayload($rawPayload): array
+    {
+        $decoded = json_decode((string)$rawPayload, true);
 
         // New format: { cart: [...], orders: [...] }
         if (is_array($decoded) && array_key_exists('cart', $decoded) && array_key_exists('orders', $decoded)) {
@@ -82,6 +87,31 @@ class CartController
         }
 
         return ['cart' => [], 'orders' => []];
+    }
+
+    private function normalizeDashboardOrder(array $order, array $owner): ?array
+    {
+        $orderId = (string)($order['id'] ?? '');
+        $orderNumber = (string)($order['orderNumber'] ?? '');
+        $orderDate = (string)($order['orderDate'] ?? ($order['created_at'] ?? ''));
+
+        if ($orderId === '' && $orderNumber === '') {
+            return null;
+        }
+
+        return [
+            'id' => $orderId,
+            'orderNumber' => $orderNumber,
+            'orderDate' => $orderDate,
+            'status' => (string)($order['status'] ?? 'processing'),
+            'total' => (float)($order['total'] ?? 0),
+            'owner' => [
+                'userType' => (string)($owner['userType'] ?? 'unknown'),
+                'userId' => (int)($owner['userId'] ?? 0),
+                'name' => (string)($owner['name'] ?? 'Unknown User'),
+                'email' => (string)($owner['email'] ?? ''),
+            ],
+        ];
     }
 
     private function saveUserStore(array $ctx, array $store): void
@@ -545,6 +575,101 @@ class CartController
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
+            http_response_code(400);
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function getAdminDashboardOrders()
+    {
+        header('Content-Type: application/json');
+        try {
+            $ctx = $this->getAuthContext();
+            if (($ctx['user_type'] ?? '') !== 'admin') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Admin access required']);
+                return;
+            }
+
+            $allRecentOrders = [];
+            $adminRecentOrders = [];
+
+            $customerStmt = $this->pdo->query(
+                "SELECT id, first_name, last_name, email, order_history AS payload FROM customers ORDER BY id ASC"
+            );
+
+            while ($customer = $customerStmt->fetch(\PDO::FETCH_ASSOC)) {
+                $store = $this->decodeStorePayload($customer['payload'] ?? '[]');
+                $ownerName = trim(((string)($customer['first_name'] ?? '')) . ' ' . ((string)($customer['last_name'] ?? '')));
+                if ($ownerName === '') {
+                    $ownerName = (string)($customer['email'] ?? 'Unknown Customer');
+                }
+
+                foreach ((array)($store['orders'] ?? []) as $order) {
+                    if (!is_array($order)) {
+                        continue;
+                    }
+
+                    $normalized = $this->normalizeDashboardOrder($order, [
+                        'userType' => 'customer',
+                        'userId' => (int)($customer['id'] ?? 0),
+                        'name' => $ownerName,
+                        'email' => (string)($customer['email'] ?? ''),
+                    ]);
+                    if ($normalized !== null) {
+                        $allRecentOrders[] = $normalized;
+                    }
+                }
+            }
+
+            $adminStmt = $this->pdo->query(
+                "SELECT id, first_name, last_name, email, processed_orders AS payload FROM admins ORDER BY id ASC"
+            );
+
+            while ($admin = $adminStmt->fetch(\PDO::FETCH_ASSOC)) {
+                $store = $this->decodeStorePayload($admin['payload'] ?? '[]');
+                $ownerName = trim(((string)($admin['first_name'] ?? '')) . ' ' . ((string)($admin['last_name'] ?? '')));
+                if ($ownerName === '') {
+                    $ownerName = (string)($admin['email'] ?? 'Unknown Admin');
+                }
+
+                foreach ((array)($store['orders'] ?? []) as $order) {
+                    if (!is_array($order)) {
+                        continue;
+                    }
+
+                    $normalized = $this->normalizeDashboardOrder($order, [
+                        'userType' => 'admin',
+                        'userId' => (int)($admin['id'] ?? 0),
+                        'name' => $ownerName,
+                        'email' => (string)($admin['email'] ?? ''),
+                    ]);
+
+                    if ($normalized === null) {
+                        continue;
+                    }
+
+                    $allRecentOrders[] = $normalized;
+                    if ((int)($admin['id'] ?? 0) === (int)$ctx['user_id']) {
+                        $adminRecentOrders[] = $normalized;
+                    }
+                }
+            }
+
+            $sortByDateDesc = static function (array $a, array $b): int {
+                $aTime = strtotime((string)($a['orderDate'] ?? '')) ?: 0;
+                $bTime = strtotime((string)($b['orderDate'] ?? '')) ?: 0;
+                return $bTime <=> $aTime;
+            };
+
+            usort($allRecentOrders, $sortByDateDesc);
+            usort($adminRecentOrders, $sortByDateDesc);
+
+            echo json_encode([
+                'all_recent_orders' => array_slice($allRecentOrders, 0, 30),
+                'admin_recent_orders' => array_slice($adminRecentOrders, 0, 30),
+            ]);
+        } catch (\Exception $e) {
             http_response_code(400);
             echo json_encode(['error' => $e->getMessage()]);
         }
