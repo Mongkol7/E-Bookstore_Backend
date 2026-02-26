@@ -214,6 +214,7 @@ If valid, decoded payload is stored in `$_SERVER['user']` for downstream control
 - `POST /api/cart/checkout`
 - `GET /api/orders`
 - `GET /api/orders/{orderId}`
+- `GET /api/admin/dashboard/orders` (admin-only aggregated recent orders)
 
 ## Order Persistence Model (PostgreSQL)
 
@@ -366,8 +367,9 @@ Backward compatibility exists for legacy array-only JSON.
 - `/api/auth/profile`
 - `/api/books`
 - `/api/orders`
+- `/api/admin/dashboard/orders`
 - `/api/customers`
-6. Dashboard renders KPIs, recent orders, low-stock list, and top-selling books.
+6. Dashboard renders KPIs, `All Recent Orders`, `Admin Recent Orders`, low-stock list, and top-selling books.
 
 ## File Responsibilities (Quick Map)
 
@@ -392,7 +394,7 @@ Backward compatibility exists for legacy array-only JSON.
 - `frontend/src/pages/...`: per-screen logic and request flow.
 - `frontend/src/components/AdminRoute.jsx`: frontend role guard for admin-only routes.
 - `frontend/src/components/StoreNavbar.jsx`: shared top navigation (logo, cart/profile menu/logout modal), responsive for phone/tablet, with optional reusable back button (`backTo`, `backLabel`) used across pages.
-- `frontend/src/pages/Dashboard/index.jsx`: admin analytics page powered by live API data.
+- `frontend/src/pages/Dashboard/index.jsx`: admin analytics page powered by live API data, including both global and admin-specific recent order feeds.
 - `frontend/src/components/Skeleton.jsx`: loading placeholders.
 - `frontend/src/components/Footer.jsx`: global footer UI.
 

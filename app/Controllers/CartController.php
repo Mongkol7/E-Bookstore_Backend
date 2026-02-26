@@ -114,6 +114,59 @@ class CartController
         ];
     }
 
+    private function findOrderInOrders(array $orders, string $orderId): ?array
+    {
+        foreach ($orders as $order) {
+            if (!is_array($order)) {
+                continue;
+            }
+
+            if (
+                (string)($order['id'] ?? '') === $orderId
+                || (string)($order['orderNumber'] ?? '') === $orderId
+            ) {
+                return $order;
+            }
+        }
+
+        return null;
+    }
+
+    private function findOrderForAdminAcrossUsers(string $orderId): ?array
+    {
+        $customerStmt = $this->pdo->query(
+            "SELECT order_history AS payload FROM customers ORDER BY id ASC"
+        );
+
+        while ($customer = $customerStmt->fetch(\PDO::FETCH_ASSOC)) {
+            $store = $this->decodeStorePayload($customer['payload'] ?? '[]');
+            $order = $this->findOrderInOrders(
+                is_array($store['orders'] ?? null) ? array_values($store['orders']) : [],
+                $orderId
+            );
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        $adminStmt = $this->pdo->query(
+            "SELECT processed_orders AS payload FROM admins ORDER BY id ASC"
+        );
+
+        while ($admin = $adminStmt->fetch(\PDO::FETCH_ASSOC)) {
+            $store = $this->decodeStorePayload($admin['payload'] ?? '[]');
+            $order = $this->findOrderInOrders(
+                is_array($store['orders'] ?? null) ? array_values($store['orders']) : [],
+                $orderId
+            );
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        return null;
+    }
+
     private function saveUserStore(array $ctx, array $store): void
     {
         $payload = [
@@ -695,17 +748,22 @@ class CartController
         try {
             $ctx = $this->getAuthContext();
             $store = $this->loadUserStore($ctx);
+            $targetOrderId = (string)$orderId;
             $orders = is_array($store['orders'] ?? null) ? array_values($store['orders']) : [];
-            foreach ($orders as $order) {
-                if (
-                    (string)($order['id'] ?? '') === (string)$orderId
-                    || (string)($order['orderNumber'] ?? '') === (string)$orderId
-                ) {
-                    $order['items'] = $this->hydrateOrderItems(is_array($order['items'] ?? null) ? $order['items'] : []);
-                    echo json_encode(['order' => $order]);
-                    return;
-                }
+
+            $order = $this->findOrderInOrders($orders, $targetOrderId);
+
+            // Admin can inspect order details from all users via the same endpoint.
+            if ($order === null && ($ctx['user_type'] ?? '') === 'admin') {
+                $order = $this->findOrderForAdminAcrossUsers($targetOrderId);
             }
+
+            if ($order !== null) {
+                $order['items'] = $this->hydrateOrderItems(is_array($order['items'] ?? null) ? $order['items'] : []);
+                echo json_encode(['order' => $order]);
+                return;
+            }
+
             http_response_code(404);
             echo json_encode(['error' => 'Order not found']);
         } catch (\Exception $e) {
