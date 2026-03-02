@@ -369,7 +369,24 @@ Backward compatibility exists for legacy array-only JSON.
 - `/api/orders`
 - `/api/admin/dashboard/orders`
 - `/api/customers`
-6. Dashboard renders KPIs, `All Recent Orders`, `Admin Recent Orders`, low-stock list, and top-selling books.
+6. Dashboard renders KPI cards, graph sections, recent orders, low-stock, and management center.
+7. Graph section contains three animated visualizations:
+- `Revenue Analytics` (line/area style),
+- `Daily Breakdown` (bar comparison),
+- `Pattern Candles` (crypto-style candlestick).
+8. Graph animations are gated by viewport visibility and replay whenever period changes (`today/week/month/year`).
+9. Dashboard includes sticky in-page section navigation with smooth-scroll targets:
+- `Overview`
+- `Graph`
+- `Recent Orders`
+- `Low Stock`
+- `Management Center`
+10. Section jump offset is mobile-aware so targets are not hidden behind sticky headers.
+11. Management forms (customers/books/categories/authors) use phone-first responsive layout:
+- paired inputs stack to one column on small screens (`grid-cols-1 sm:grid-cols-2`)
+- action buttons stack on phone (`flex-col sm:flex-row`)
+- compact spacing (`p-3 sm:p-4`) keeps forms usable on narrow viewports.
+12. KPI cards render as 2 columns on phone (2x2 for four cards), then expand to 4 columns on larger screens.
 
 ## File Responsibilities (Quick Map)
 
@@ -394,7 +411,7 @@ Backward compatibility exists for legacy array-only JSON.
 - `frontend/src/pages/...`: per-screen logic and request flow.
 - `frontend/src/components/AdminRoute.jsx`: frontend role guard for admin-only routes.
 - `frontend/src/components/StoreNavbar.jsx`: shared top navigation (logo, cart/profile menu/logout modal), responsive for phone/tablet, with optional reusable back button (`backTo`, `backLabel`) used across pages.
-- `frontend/src/pages/Dashboard/index.jsx`: admin analytics page powered by live API data, including both global and admin-specific recent order feeds.
+- `frontend/src/pages/Dashboard/index.jsx`: admin analytics page powered by live API data, with multi-chart animated analytics (line/bar/candlestick), viewport-triggered + period-replay chart animations, sticky section navigation, and responsive management/forms layout.
 - `frontend/src/components/Skeleton.jsx`: loading placeholders.
 - `frontend/src/components/Footer.jsx`: global footer UI.
 
