@@ -64,6 +64,15 @@ if ($request_path === '') {
         http_response_code(405);
         echo json_encode(['error' => 'Method Not Allowed']);
     }
+} elseif ($request_path === '/api/books/stock') {
+    AuthMiddleware::authenticate();
+    $controller = new BookController();
+    if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
+        $controller->restockBook();
+    } else {
+        http_response_code(405);
+        echo json_encode(['error' => 'Method Not Allowed']);
+    }
 } elseif ($request_path === '/api/books/delete') {
     AuthMiddleware::authenticate();
     $controller = new BookController();

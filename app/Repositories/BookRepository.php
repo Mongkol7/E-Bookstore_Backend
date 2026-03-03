@@ -176,6 +176,15 @@ class BookRepository
             $stmt->bindValue(':image', $book->getImage());
             return $stmt->execute();
         }
+
+        public function incrementStock(int $id, int $quantity): bool{
+            $sql = "UPDATE books SET stock = stock + :quantity WHERE id = :id";
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->bindValue(':quantity', $quantity, PDO::PARAM_INT);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->rowCount() > 0;
+        }
         
         public function delete(int $id): bool{
             $sql = "DELETE FROM books WHERE id = :id";
