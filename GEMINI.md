@@ -68,6 +68,7 @@ Core domains:
 - `frontend/src/utils/auth.js`: token storage and cleanup logic
 - `frontend/src/components/AdminRoute.jsx`: admin page route guard
 - `frontend/src/components/StoreNavbar.jsx`: shared responsive nav bar and profile/logout control
+- `frontend/src/components/BookSearchControls.jsx`: reusable search/scope/filter control used in Homepage and Admin Management lists
 - `frontend/src/components/ProcessingOverlay.jsx`: loading overlay UI component
 - `frontend/src/components/Skeleton.jsx`: loading placeholders
 - `frontend/src/pages/...`: feature pages (Auth, Home, Cart, Checkout, Orders, Order detail, Product detail, Dashboard)
@@ -501,6 +502,26 @@ Returns JSON with:
 - books (add/edit/delete)
 - categories (add/edit/delete)
 - authors (add/edit/delete)
+
+6. Management center list UX
+- shared search/filter component (`BookSearchControls`) reused across:
+  - Homepage book grid
+  - Dashboard customers/books/categories/authors lists
+- per-tab scoped search:
+  - Customers: name/email/phone
+  - Books: title/author/category
+  - Categories: name
+  - Authors: name/bio
+- highlighted text matches in list rows for faster visual scanning
+- search/filter controls pinned above the scroll area (list content scrolls independently)
+
+7. Management center action UX
+- delete confirmation uses SweetAlert (replaces browser `window.confirm`)
+- phone behavior:
+  - tapping `Edit` (and `Add` where available) opens form in a centered modal
+  - modal is fixed to viewport center, independent of page scroll position
+  - modal content is internally scrollable (`max-height + overflow-y-auto`)
+  - backdrop/cancel/close actions dismiss popup cleanly
 
 ## Navbar And Shared UX Behavior
 
