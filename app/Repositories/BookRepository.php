@@ -147,14 +147,24 @@ class BookRepository
         );
     }
         public function save(BookModel $book): bool{
-            $sql = "CALL createBook(:title, :author_id, :category_id, :price, :stock, :description, :published_date, :image)";
+            // Explicit casts avoid PostgreSQL procedure ambiguity when multiple signatures exist.
+            $sql = "CALL public.createBook(
+                CAST(:title AS VARCHAR(255)),
+                CAST(:author_id AS INT),
+                CAST(:category_id AS INT),
+                CAST(:price AS DECIMAL(10,2)),
+                CAST(:stock AS INT),
+                CAST(:description AS TEXT),
+                CAST(:published_date AS DATE),
+                CAST(:image AS TEXT)
+            )";
     
             $stmt = $this->pdo->prepare($sql);
             $stmt->bindValue(':title', $book->getTitle());
-            $stmt->bindValue(':author_id', $book->getAuthorId());
-            $stmt->bindValue(':category_id', $book->getCategoryId());
+            $stmt->bindValue(':author_id', $book->getAuthorId(), PDO::PARAM_INT);
+            $stmt->bindValue(':category_id', $book->getCategoryId(), PDO::PARAM_INT);
             $stmt->bindValue(':price', $book->getPrice());
-            $stmt->bindValue(':stock', $book->getStock());
+            $stmt->bindValue(':stock', $book->getStock(), PDO::PARAM_INT);
             $stmt->bindValue(':description', $book->getDescription());
             $stmt->bindValue(':published_date', $book->getPublishedDate());
             $stmt->bindValue(':image', $book->getImage());
@@ -162,15 +172,26 @@ class BookRepository
         }
 
         public function update(BookModel $book): bool{
-            $sql = "CALL updateBook(:id, :title, :author_id, :category_id, :price, :stock, :description, :published_date, :image)";
+            // Explicit casts avoid PostgreSQL procedure ambiguity when multiple signatures exist.
+            $sql = "CALL public.updateBook(
+                CAST(:id AS INT),
+                CAST(:title AS VARCHAR(255)),
+                CAST(:author_id AS INT),
+                CAST(:category_id AS INT),
+                CAST(:price AS DECIMAL(10,2)),
+                CAST(:stock AS INT),
+                CAST(:description AS TEXT),
+                CAST(:published_date AS DATE),
+                CAST(:image AS TEXT)
+            )";
     
             $stmt = $this->pdo->prepare($sql);
-            $stmt->bindValue(':id', $book->getId());
+            $stmt->bindValue(':id', $book->getId(), PDO::PARAM_INT);
             $stmt->bindValue(':title', $book->getTitle());
-            $stmt->bindValue(':author_id', $book->getAuthorId());
-            $stmt->bindValue(':category_id', $book->getCategoryId());
+            $stmt->bindValue(':author_id', $book->getAuthorId(), PDO::PARAM_INT);
+            $stmt->bindValue(':category_id', $book->getCategoryId(), PDO::PARAM_INT);
             $stmt->bindValue(':price', $book->getPrice());
-            $stmt->bindValue(':stock', $book->getStock());
+            $stmt->bindValue(':stock', $book->getStock(), PDO::PARAM_INT);
             $stmt->bindValue(':description', $book->getDescription());
             $stmt->bindValue(':published_date', $book->getPublishedDate());
             $stmt->bindValue(':image', $book->getImage());

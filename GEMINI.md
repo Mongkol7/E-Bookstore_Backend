@@ -1,98 +1,234 @@
 # GEMINI.md
 
-## Project Overview
+## Purpose Of This Document
 
-This project is a custom PHP API with a React frontend for an e-commerce bookstore.
+This file explains how the full E-Bookstore system works, from request entry to database writes to frontend rendering.
 
-- Backend entry point: `public/index.php`
-- Backend routing: `routes/web.php`
-- Controllers: `app/Controllers`
-- Repositories: `app/Repositories`
-- Models: `app/Models`
-- Frontend app: `frontend/` (React + Vite + React Router)
+It is written for:
+- developers who need to understand the codebase quickly,
+- maintainers debugging production issues,
+- contributors adding features without breaking existing behavior.
 
-## Current Stack
+The goal is to make each major process explicit and easy to follow.
 
-- Backend: PHP (custom MVC-like structure)
-- Frontend: React, Vite, Tailwind-style utility classes
+## System Summary
+
+This project is a full-stack bookstore:
+- Backend: custom PHP API (no full framework)
+- Frontend: React + Vite + React Router
 - Database: PostgreSQL (Supabase or Railway)
-- Auth token: JWT in `HttpOnly` cookie (`auth_token`)
+- Auth: JWT + HttpOnly cookie + optional Bearer token
 
-## Environment
+Core domains:
+- Authentication and profiles
+- Books, authors, categories
+- Cart and checkout
+- Orders and order details
+- Admin dashboard analytics and management
+- Asynchronous purchase alert email queue
 
-### Backend `.env`
+## Repository And File Map
+
+### Backend root
+- `public/index.php`: backend entrypoint, CORS policy, preflight handling, route handoff
+- `routes/web.php`: path/method dispatcher for all API endpoints
+- `config/database.php`: PDO bootstrap and connection strategy (supports `DATABASE_URL` and direct DB vars)
+- `app/Middleware/AuthMiddleware.php`: protects routes and injects auth context in `$_SERVER['user']`
+- `app/Helpers/JwtHelper.php`: JWT issue/verify
+- `app/Helpers/CookieHelper.php`: cookie options (`SameSite`, `Secure`, path/domain)
+- `app/Helpers/MailHelper.php`: email delivery abstraction (Resend API or SMTP fallback)
+
+### Controllers
+
+- `app/Controllers/AuthController.php`: login/profile/logout unified auth flow
+- `app/Controllers/BookController.php`: books CRUD + stock-only restock endpoint
+- `app/Controllers/AuthorController.php`: author CRUD
+- `app/Controllers/CategoryController.php`: category CRUD
+- `app/Controllers/CustomerController.php`: customer CRUD + legacy auth endpoint
+- `app/Controllers/AdminController.php`: admin CRUD + legacy auth endpoint
+- `app/Controllers/CartController.php`: cart lifecycle, checkout, orders, admin dashboard order aggregation, outbox enqueue
+
+### Repositories and models
+
+- `app/Repositories/*.php`: SQL statements and row mapping
+- `app/Models/*.php`: typed domain objects used by repositories/controllers
+
+### Queue and operational scripts
+
+- `scripts/process_purchase_alert_queue.php`: cron worker that claims/sends/retries outbox jobs
+- `scripts/purchase_alert_queue_stats.php`: operational queue summary output
+- `database/purchase_alert_outbox.sql`: outbox table/index DDL
+- `database/supabase_performance.sql`: index/performance SQL helper set
+
+### Frontend
+
+- `frontend/src/main.jsx`: app bootstrap
+- `frontend/src/App.jsx`: route definitions
+- `frontend/src/utils/api.js`: API URL builder and authenticated fetch wrapper
+- `frontend/src/utils/auth.js`: token storage and cleanup logic
+- `frontend/src/components/AdminRoute.jsx`: admin page route guard
+- `frontend/src/components/StoreNavbar.jsx`: shared responsive nav bar and profile/logout control
+- `frontend/src/components/ProcessingOverlay.jsx`: loading overlay UI component
+- `frontend/src/components/Skeleton.jsx`: loading placeholders
+- `frontend/src/pages/...`: feature pages (Auth, Home, Cart, Checkout, Orders, Order detail, Product detail, Dashboard)
+
+## Runtime Architecture
+
+## Backend runtime pipeline
+
+Every API request passes this path:
+
+1. `public/index.php`
+- Loads Composer autoload and `.env`
+- Builds CORS allow-list from defaults + `CORS_ALLOWED_ORIGINS`
+- Optionally allows Vercel preview domains when enabled
+- Handles `OPTIONS` preflight immediately
+- Includes `routes/web.php`
+
+2. `routes/web.php`
+- Normalizes path and method
+- Matches endpoint by `if/elseif`
+- Runs `AuthMiddleware::authenticate()` on protected routes
+- Calls controller method
+
+3. Controller (`app/Controllers/*`)
+- Parses JSON payload
+- Validates required fields and business rules
+- Calls repository or business helpers
+- Sends HTTP status + JSON response
+
+4. Repository (`app/Repositories/*`)
+- Runs SQL using PDO prepared statements
+- Converts DB rows into models/arrays
+
+5. Database
+- PostgreSQL persistence and transaction control
+- JSONB-based cart/order storage per user
+
+## Frontend runtime pipeline
+
+1. `frontend/src/main.jsx` mounts React app.
+2. `frontend/src/App.jsx` maps routes to pages.
+3. `frontend/src/utils/api.js` sends requests with:
+- `Authorization: Bearer <token>` if token exists
+- `credentials: include` for cookie support
+4. Pages parse responses and update local state/UI.
+5. `StoreNavbar` and `AdminRoute` call profile endpoint to adapt UI by role.
+
+## Authentication And Session Model
+
+## Token sources and route protection
+
+`AuthMiddleware` accepts token from either:
+- `Authorization: Bearer ...` header
+- `auth_token` cookie
+
+If valid, decoded JWT payload is exposed via `$_SERVER['user']`.
+If invalid/missing, API returns `401`.
+
+## Login behavior
+
+Preferred login endpoint:
+- `POST /api/login`
+
+Backend checks both customer/admin records and returns role-aware profile data.
+On success:
+- JWT cookie is set (HttpOnly)
+- token also returned in response for frontend storage fallback
+
+Frontend stores token using `frontend/src/utils/auth.js`:
+- localStorage when remember-me style persistence is desired
+- sessionStorage otherwise
+
+## Cookie policy
+
+`CookieHelper` determines `SameSite` and `Secure` based on environment and request context.
+For cross-site frontend/backend deployments, use:
+- HTTPS
+- `COOKIE_SAMESITE=None`
+- matching CORS origin configuration
+
+## Environment Variables
+
+### Backend `.env` (example)
 
 ```env
 DB_DRIVER=pgsql
 DB_SSLMODE=require
 
-# Option A: Supabase style
+# Option A: explicit connection fields (commonly Supabase)
 DB_HOST=aws-1-ap-northeast-1.pooler.supabase.com
 DB_PORT=5432
 DB_DATABASE=postgres
-DB_USERNAME=postgres.hpxsnvwvwyzydpryjyni
+DB_USERNAME=postgres.YOUR_PROJECT_REF
 DB_PASSWORD=YOUR_SUPABASE_DB_PASSWORD
 
-# Option B: Railway style (supported directly)
-DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@YOUR_RAILWAY_PRIVATE_DOMAIN:5432/railway
-# or
-DATABASE_PUBLIC_URL=postgresql://postgres:YOUR_PASSWORD@YOUR_RAILWAY_TCP_PROXY_DOMAIN:YOUR_RAILWAY_TCP_PROXY_PORT/railway
+# Option B: URL style (commonly Railway)
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@HOST:5432/railway
+DATABASE_PUBLIC_URL=postgresql://postgres:YOUR_PASSWORD@HOST:PORT/railway
 
 JWT_SECRET=YOUR_JWT_SECRET
 
-# CORS/Cookie for local + deployment
-CORS_ALLOWED_ORIGINS=https://your-vercel-app.vercel.app
+CORS_ALLOWED_ORIGINS=https://your-frontend-domain.vercel.app
 CORS_ALLOW_VERCEL_PREVIEWS=true
+
 COOKIE_SAMESITE=None
 COOKIE_DOMAIN=
 COOKIE_PATH=/
 
-# Purchase alert email (owner notification)
 MAIL_ENABLED=true
 MAIL_PROVIDER=auto
 MAIL_TIMEOUT=20
 MAIL_FROM_ADDRESS=no-reply@example.com
-MAIL_FROM_NAME=Ecommerce Store
+MAIL_FROM_NAME=E-Bookstore
 PURCHASE_ALERT_TO=owner@example.com
 PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
 
-# Recommended transport on Railway (HTTPS)
-RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+# Recommended provider transport
+RESEND_API_KEY=re_xxxxxxxxxxxxx
 RESEND_API_URL=https://api.resend.com/emails
 
-# Optional SMTP fallback transport
+# Optional SMTP fallback
 MAIL_HOST=smtp.example.com
 MAIL_PORT=587
 MAIL_ENCRYPTION=tls
-MAIL_USERNAME=your-smtp-username
-MAIL_PASSWORD=your-smtp-password
+MAIL_USERNAME=your_smtp_user
+MAIL_PASSWORD=your_smtp_pass
 ```
 
-### Frontend `frontend/.env`
+### Frontend `frontend/.env` (example)
 
 ```env
-VITE_API_BASE_URL=http://localhost:3000
+VITE_API_BASE_URL=http://localhost/Ecommerce/public
 ```
 
 Notes:
-- Supabase/Railway are database providers; backend API must still be running.
-- XAMPP MySQL is not required unless `DB_DRIVER` is changed.
+- If this variable is omitted in dev, frontend currently falls back to `http://localhost/Ecommerce/public`.
+- For production deployments, always set explicit `VITE_API_BASE_URL`.
 
-## Run Instructions (Local)
+## Local Development Runbook
 
-1. Install PHP dependencies:
+1. Install backend dependencies:
 
 ```bash
 composer install
 ```
 
-2. Start backend API:
+2. Backend run options:
+- XAMPP/Apache style: serve from `http://localhost/Ecommerce/public`
+- Built-in PHP server style:
 
 ```bash
 php -S localhost:3000 -t public
 ```
 
-3. Start frontend:
+If you use port 3000, set frontend env accordingly:
+
+```env
+VITE_API_BASE_URL=http://localhost:3000
+```
+
+3. Install and run frontend:
 
 ```bash
 cd frontend
@@ -100,130 +236,21 @@ npm install
 npm run dev
 ```
 
-Frontend dev URL is typically `http://localhost:5173`.
+4. Build check:
 
-## Core Architecture Process
+```bash
+npm run build
+```
 
-### Backend request lifecycle (execution order)
+## Database Data Model And Persistence Strategy
 
-1. `public/index.php`
-- Loads Composer autoload.
-- Loads `.env` early.
-- Builds CORS allowlist (localhost + `CORS_ALLOWED_ORIGINS`, optional `*.vercel.app`).
-- Sends CORS headers and handles preflight `OPTIONS`.
-- Includes `routes/web.php`.
+## Why cart/orders are in JSONB
 
-2. `routes/web.php`
-- Normalizes incoming path and method.
-- Matches route via `if/elseif` tree.
-- Calls `AuthMiddleware::authenticate()` for protected endpoints.
-- Dispatches to controller methods.
-
-3. Controller layer (`app/Controllers/*`)
-- Parses JSON payload.
-- Validates required fields.
-- Calls repository/business logic.
-- Returns HTTP status and JSON response.
-
-4. Repository layer (`app/Repositories/*`)
-- Executes SQL with PDO.
-- Maps DB rows to model objects.
-
-5. Model layer (`app/Models/*`)
-- Represents typed domain entities passed between repositories and controllers.
-
-6. Database connection (`config/database.php`)
-- Initializes and reuses PDO.
-- Supports `DATABASE_URL`/`DATABASE_PUBLIC_URL` parsing.
-- Supports PostgreSQL (default) and MySQL DSN.
-
-### Auth/Cookie process
-
-- JWT generation/verification: `app/Helpers/JwtHelper.php`
-- Cookie option policy: `app/Helpers/CookieHelper.php`
-- Token resolution and auth context injection: `app/Middleware/AuthMiddleware.php`
-
-`AuthMiddleware` resolves token from:
-1. `Authorization: Bearer <token>` header
-2. `auth_token` cookie
-
-If valid, decoded payload is stored in `$_SERVER['user']` for downstream controllers.
-
-### Frontend execution order
-
-1. `frontend/src/main.jsx` mounts React app.
-2. `frontend/src/App.jsx` maps URL paths to page components.
-3. Route guard `frontend/src/components/AdminRoute.jsx` restricts admin-only pages.
-4. Pages call backend through `frontend/src/utils/api.js`.
-5. Auth token persistence and cleanup are handled by `frontend/src/utils/auth.js`.
-
-## Auth Behavior (Current)
-
-### Signup (`/signup`)
-
-- Customer-only signup
-- Calls `POST /api/customers/post`
-- Sends: `first_name`, `last_name`, `email`, `phone`, `address`, `password`
-- Password is hashed before storage
-
-### Login (`/login`)
-
-- Frontend calls unified endpoint: `POST /api/login`
-- Backend checks customer/admin in one request
-- Frontend uses `credentials: include`
-- Token is set as `auth_token` cookie and also returned in JSON
-- Frontend redirects by role:
-  - `admin` -> `/admin/dashboard`
-  - `customer` -> `/`
-
-### Profile / Logout
-
-- `GET /api/auth/profile`
-- `POST /api/logout`
-
-## Cookie + CORS (Current)
-
-- Cookie name: `auth_token`
-- CORS supports local origins + configured origins from `CORS_ALLOWED_ORIGINS`
-- Optional wildcard support for Vercel previews via `CORS_ALLOW_VERCEL_PREVIEWS=true`
-- Cookie options are centralized via `app/Helpers/CookieHelper.php`
-- For cross-site deployment (Vercel frontend + separate backend), use `SameSite=None` + HTTPS
-
-## API Endpoints (Core)
-
-### Public
-
-- `GET /api/books`
-- `GET /api/books/{id}`
-
-### Auth
-
-- `POST /api/login`
-- `GET /api/auth/profile`
-- `POST /api/logout`
-- `POST /api/customers/post`
-- `POST /api/customers/login` (legacy path, still present)
-- `POST /api/admins/login` (legacy path, still present)
-
-### Cart / Orders
-
-- `GET /api/cart`
-- `POST /api/cart/add`
-- `PUT /api/cart/quantity`
-- `DELETE /api/cart/remove`
-- `POST /api/cart/checkout`
-- `GET /api/orders`
-- `GET /api/orders/{orderId}`
-- `GET /api/admin/dashboard/orders` (admin-only aggregated recent orders)
-
-## Order Persistence Model (PostgreSQL)
-
-User-specific data is stored in JSONB:
-
+This project stores user cart and order history in JSONB columns:
 - `customers.order_history`
 - `admins.processed_orders`
 
-Normalized shape:
+Normalized in-app shape:
 
 ```json
 {
@@ -232,221 +259,379 @@ Normalized shape:
 }
 ```
 
-Backward compatibility exists for legacy array-only JSON.
+The code also supports legacy array-only payloads for backward compatibility.
 
-## Performance Notes
+## Checkout writes
 
-- Database connection uses tuned PDO settings in `config/database.php`.
-- Admin/customer email lookups are case-insensitive.
-- Unified `/api/login` reduces auth round-trips.
-- Recommended DB indexes are in `database/supabase_performance.sql`.
-- Checkout no longer performs direct SMTP send in request path.
-- Purchase alerts are queued in DB and processed asynchronously by worker cron.
+Checkout transaction does:
+- stock decrement on each purchased book
+- sales counter increment when `sales_count` or `sold` column exists
+- prepend order into user `orders` array
+- clear user `cart`
+
+After DB commit, checkout enqueues purchase-alert outbox job.
+No direct SMTP send occurs in checkout request path.
+
+## API Endpoint Catalog
+
+## Public
+
+- `GET /api/books`
+- `GET /api/books/{id}`
+
+## Auth and profile
+
+- `POST /api/login` (preferred unified login)
+- `GET /api/auth/profile`
+- `POST /api/logout`
+- `POST /api/customers/post` (customer signup)
+- `POST /api/customers/login` (legacy)
+- `POST /api/admins/login` (legacy)
+
+## Cart and orders
+
+- `GET /api/cart`
+- `POST /api/cart/add`
+- `PUT /api/cart/quantity`
+- `DELETE /api/cart/remove`
+- `POST /api/cart/checkout`
+- `GET /api/orders`
+- `GET /api/orders/{orderId}`
+- `GET /api/admin/dashboard/orders`
+
+## Management endpoints
+
+Protected by auth middleware:
+- Books: `POST /api/books/post`, `PUT /api/books/put`, `DELETE /api/books/delete`, `PUT /api/books/stock`
+- Authors: `GET /api/authors`, `POST /api/authors/post`, `PUT /api/authors/put`, `DELETE /api/authors/delete`
+- Categories: `GET /api/categories`, `POST /api/categories/post`, `PUT /api/categories/put`, `DELETE /api/categories/delete`
+- Customers: `GET /api/customers`, `PUT /api/customers/put`, `DELETE /api/customers/delete`
+- Admins: `GET /api/admins`, `PUT /api/admins/put`, `DELETE /api/admins/delete`
 
 ## Frontend Routes
 
-- `/` -> Homepage
-- `/product/:bookId` -> Product detail page
-- `/login` -> Login page
-- `/signup` -> Signup page
-- `/cart` -> Cart page
-- `/checkout` -> Checkout page
-- `/orders` -> Orders list
-- `/orders/:orderId` -> Order detail page
-- `/admin/dashboard` -> Admin dashboard (admin-only)
-- `/dashboard` -> Admin dashboard alias (admin-only)
+Defined in `frontend/src/App.jsx`:
+- `/` Homepage
+- `/login`
+- `/signup`
+- `/product/:bookId`
+- `/cart`
+- `/checkout`
+- `/orders`
+- `/orders/:orderId`
+- `/admin/dashboard` (admin-only)
+- `/dashboard` (admin-only alias)
 
-## Detailed End-to-End Sequence Flows
+## End-To-End Flows
 
-### Flow A: Login
+## Flow 1: Signup
 
-1. User submits login form in `frontend/src/pages/Auth/Login/index.jsx`.
-2. Frontend sends `POST /api/login` with `{ email, password }`.
-3. `public/index.php` applies CORS and forwards to `routes/web.php`.
-4. `routes/web.php` dispatches to `AuthController::login()`.
-5. Controller queries customer and admin tables (case-insensitive email).
-6. Password is verified (hashed or legacy plaintext fallback).
-7. On success:
-- `last_login` updated.
-- JWT created by `JwtHelper`.
-- `auth_token` cookie set via `CookieHelper`.
-- JSON response includes user profile and token.
-8. Frontend stores token using `saveAuthToken()` and redirects by role:
+1. User submits signup form (`frontend/src/pages/Auth/Signup/index.jsx`).
+2. Frontend calls `POST /api/customers/post`.
+3. Backend validates payload and persists customer record.
+4. Password is hashed before storing.
+5. Frontend shows result and routes user to login flow.
+
+## Flow 2: Login
+
+1. User submits login form (`frontend/src/pages/Auth/Login/index.jsx`).
+2. Frontend calls `POST /api/login`.
+3. Backend verifies credentials against customer/admin.
+4. Backend issues JWT + sets `auth_token` cookie.
+5. Frontend stores token and redirects by role:
 - admin -> `/admin/dashboard`
 - customer -> `/`
 
-### Flow B: Load homepage + books + profile
+## Flow 3: Browse books and profile-aware nav
 
-1. `frontend/src/pages/Home/Homepage/index.jsx` mounts.
-2. Shared navbar (`frontend/src/components/StoreNavbar.jsx`) calls `GET /api/auth/profile`.
-3. Backend route requires `AuthMiddleware::authenticate()`.
-4. Middleware resolves token from Bearer/cookie and injects `$_SERVER['user']`.
-5. `AuthController::getProfile()` loads user through `CustomerRepository` or `AdminRepository`.
-6. Frontend updates navbar profile name/role.
-7. Frontend calls `GET /api/books`.
-8. `BookController::getAllBooks()` -> `BookRepository::getAll()`.
-9. Repository returns books with author/category joins, optional rating/sales columns.
-10. Homepage renders searchable/filterable book grid.
+1. Homepage loads (`frontend/src/pages/Home/Homepage/index.jsx`).
+2. Navbar calls `GET /api/auth/profile`.
+3. Homepage calls `GET /api/books`.
+4. UI renders searchable/filterable products.
+5. Navbar adapts actions by role (admin sees Dashboard/Home links).
 
-### Flow C: Add to cart
+## Flow 4: Cart add/update/remove
 
-1. User clicks Add to Cart in homepage.
-2. Frontend sends `POST /api/cart/add` with `{ book_id, quantity }`.
-3. Route requires auth middleware.
-4. `CartController::addToCart()`:
-- Loads user storage (`order_history` or `processed_orders`).
-- Validates book existence and stock.
-- Adds/merges cart item.
-- Persists normalized JSONB payload.
-5. Frontend shows success/failure feedback.
+1. Add to cart triggers `POST /api/cart/add`.
+2. Cart page loads current cart with `GET /api/cart`.
+3. Item edits are maintained in local UI state.
+4. Quantity sync occurs via `PUT /api/cart/quantity` when needed.
+5. Remove uses `DELETE /api/cart/remove`.
 
-### Flow D: Cart quantity update/remove
+## Flow 5: Checkout and outbox enqueue
 
-1. Cart page loads via `GET /api/cart`.
-2. `CartController::getCart()` hydrates item metadata (stock/category) and returns `items`.
-3. Quantity edits (`+`, `-`, typing) are applied in local UI state first.
-4. On `Proceed to Checkout`, frontend validates each edited quantity.
-5. Only changed quantities are synced via `PUT /api/cart/quantity`.
-6. Remove sends `DELETE /api/cart/remove`.
-7. Controller filters out item and persists updated cart.
+1. Frontend posts checkout details to `POST /api/cart/checkout`.
+2. Backend validates cart and stock.
+3. Transaction executes stock/sales/order/cart updates.
+4. Transaction commits.
+5. Backend inserts `purchase_alert_outbox` job.
+6. Response includes:
+- order payload
+- `mail_status` (`queued` or `queue_failed`)
+- `mail_queue_id` when available
 
-### Flow E: Checkout
+Result: checkout latency is decoupled from email provider latency.
 
-1. Checkout page receives cart items from route state.
-2. Page optionally auto-fills user profile via `GET /api/auth/profile`.
-3. User completes shipping/payment UI steps.
-4. Final submit sends `POST /api/cart/checkout` with shipping and payment method metadata.
-5. `CartController::checkout()`:
-- Validates authenticated user and non-empty cart.
-- Revalidates each book stock.
-- Computes subtotal, tax, shipping, total.
-- Creates order object.
-- Starts DB transaction.
-- Decrements book stock.
-- Increments `sales_count` or `sold` if column exists.
-- Prepends order into orders array.
-- Clears cart.
-- Saves JSONB payload and commits.
- - After successful commit, inserts purchase-alert job into `purchase_alert_outbox`.
- - Returns response with `mail_status: "queued"` (and optional queue id).
-6. Frontend shows success and redirects to cart/orders path.
+## Flow 6: Orders and detail page
 
-### Flow F: Order history and order detail
+1. Orders list calls `GET /api/orders`.
+2. User clicks order -> `/orders/:orderId`.
+3. Detail page calls `GET /api/orders/{orderId}`.
+4. Backend lookup supports both:
+- internal `id`
+- display `orderNumber` (`ORD-...`)
+5. Admin can resolve details across all users if not found in own store.
 
-1. Orders page calls `GET /api/orders`.
-2. `CartController::getOrders()` loads user orders and hydrates embedded items.
-3. Page lists orders with totals/date and links to `/orders/:orderId`.
-4. Detail page calls `GET /api/orders/{orderId}`.
-5. `CartController::getOrderById()` returns exact order payload.
-6. Detail page renders timeline/items/shipping/payment blocks.
+## Flow 7: Admin dashboard data
 
-### Flow G: Purchase-alert queue worker
-
-1. Railway worker service `purchase-alert-queue-worker` runs cron schedule `*/5 * * * *`.
-2. Start command:
-   `php -d variables_order=EGPCS scripts/process_purchase_alert_queue.php --limit=20 --max-attempts=6`
-3. Worker claims due jobs with `FOR UPDATE SKIP LOCKED`.
-4. For each job:
-   - sends alert email via configured provider (`MAIL_PROVIDER=auto` => Resend if key exists),
-   - marks `sent` on success,
-   - or increments attempts and schedules backoff on transient failure,
-   - marks `failed` when max attempts exceeded.
-5. Queue stats can be checked with:
-   `php scripts/purchase_alert_queue_stats.php`
-
-### Flow H: Admin dashboard access
-
-1. Admin logs in via `POST /api/login`.
-2. Login response includes role; frontend redirects admin to `/admin/dashboard`.
-3. Route is wrapped by `frontend/src/components/AdminRoute.jsx`.
-4. `AdminRoute` calls `GET /api/auth/profile`:
-- unauthenticated -> redirect `/login`
-- non-admin role -> redirect `/`
-- admin role -> allow access
-5. `frontend/src/pages/Dashboard/index.jsx` fetches:
+`frontend/src/pages/Dashboard/index.jsx` loads data from:
 - `/api/auth/profile`
 - `/api/books`
 - `/api/orders`
 - `/api/admin/dashboard/orders`
+- `/api/authors`
+- `/api/categories`
 - `/api/customers`
-6. Dashboard renders KPI cards, graph sections, recent orders, low-stock, and management center.
-7. Graph section contains three animated visualizations:
-- `Revenue Analytics` (line/area style),
-- `Daily Breakdown` (bar comparison),
-- `Pattern Candles` (crypto-style candlestick).
-8. Graph animations are gated by viewport visibility and replay whenever period changes (`today/week/month/year`).
-9. Dashboard includes sticky in-page section navigation with smooth-scroll targets:
-- `Overview`
-- `Graph`
-- `Recent Orders`
-- `Low Stock`
-- `Management Center`
-10. Section jump offset is mobile-aware so targets are not hidden behind sticky headers.
-11. Management forms (customers/books/categories/authors) use phone-first responsive layout:
-- paired inputs stack to one column on small screens (`grid-cols-1 sm:grid-cols-2`)
-- action buttons stack on phone (`flex-col sm:flex-row`)
-- compact spacing (`p-3 sm:p-4`) keeps forms usable on narrow viewports.
-12. KPI cards render as 2 columns on phone (2x2 for four cards), then expand to 4 columns on larger screens.
 
-## File Responsibilities (Quick Map)
+Dashboard sections include:
+- KPI cards
+- Revenue and breakdown charts
+- Pattern candle chart
+- All recent orders
+- Admin recent orders
+- Low stock
+- Management center (customers/books/categories/authors)
 
-### Backend
+## Flow 8: Low stock restock (important)
 
-- `public/index.php`: CORS bootstrap + route handoff.
-- `routes/web.php`: path/method dispatch table.
-- `app/Middleware/AuthMiddleware.php`: route protection.
-- `app/Helpers/JwtHelper.php`: token encode/decode.
-- `app/Helpers/CookieHelper.php`: secure cookie option strategy.
-- `app/Controllers/*.php`: input validation + response behavior.
-- `app/Repositories/*.php`: SQL and persistence.
-- `app/Models/*.php`: domain object shape.
-- `config/database.php`: PDO config/bootstrap.
+Current robust flow:
 
-### Frontend
+1. Low stock list is derived using `stock <= 10`, so out-of-stock (`0`) books are included.
+2. Admin enters per-row restock quantity.
+3. Frontend validates quantity `> 0`.
+4. Frontend calls `PUT /api/books/stock` with:
 
-- `frontend/src/main.jsx`: app bootstrap.
-- `frontend/src/App.jsx`: client routes.
-- `frontend/src/utils/api.js`: API URL build + authenticated fetch.
-- `frontend/src/utils/auth.js`: token persistence/session cleanup.
-- `frontend/src/pages/...`: per-screen logic and request flow.
-- `frontend/src/components/AdminRoute.jsx`: frontend role guard for admin-only routes.
-- `frontend/src/components/StoreNavbar.jsx`: shared top navigation (logo, cart/profile menu/logout modal), responsive for phone/tablet, with optional reusable back button (`backTo`, `backLabel`) used across pages.
-- `frontend/src/pages/Dashboard/index.jsx`: admin analytics page powered by live API data, with multi-chart animated analytics (line/bar/candlestick), viewport-triggered + period-replay chart animations, sticky section navigation, and responsive management/forms layout.
-- `frontend/src/components/Skeleton.jsx`: loading placeholders.
-- `frontend/src/components/Footer.jsx`: global footer UI.
+```json
+{
+  "id": 123,
+  "quantity": 10
+}
+```
 
-## Troubleshooting
+5. Backend `BookController::restockBook()` validates input.
+6. Repository `incrementStock()` executes:
+- `UPDATE books SET stock = stock + :quantity WHERE id = :id`
+7. Frontend refreshes books and updates Low Stock panel.
 
-- `Unable to connect to server` (localhost):
-  - Confirm backend is running (`php -S localhost:3000 -t public`).
-  - Confirm `frontend/.env` has `VITE_API_BASE_URL=http://localhost:3000`.
+Why this endpoint exists:
+- `PUT /api/books/put` requires full book payload and can fail for incomplete/legacy records.
+- `PUT /api/books/stock` is minimal and reliable for restock-only actions.
 
-- `404` on `https://<vercel>.vercel.app/api/...`:
-  - `VITE_API_BASE_URL` is missing in Vercel env.
-  - Set it to your public backend domain and redeploy.
+## Email Queue Architecture
 
-- Cookie/session issues on deployment:
-  - Ensure backend is HTTPS.
-  - Set `COOKIE_SAMESITE=None`.
-  - Ensure `CORS_ALLOWED_ORIGINS` includes frontend domain.
+## Outbox table purpose
 
-- `Invalid credentials`:
-  - Ensure password is sent as a string, e.g. `"123"`.
+`purchase_alert_outbox` stores durable email jobs independent of request lifecycle.
 
-- Purchase alert rows stay `pending`/`failed`:
-  - Check worker service exists and cron is configured on `purchase-alert-queue-worker` (not API service).
-  - Check worker start command includes `-d variables_order=EGPCS`.
-  - Confirm `RESEND_API_KEY` is present on both `E-Bookstore_Backend` and `purchase-alert-queue-worker`.
-  - Confirm `MAIL_FROM_ADDRESS` is valid for your Resend account (or `onboarding@resend.dev` for test mode).
-  - Requeue failed rows after config fix:
-    `UPDATE purchase_alert_outbox SET status='pending', next_attempt_at=NOW(), updated_at=NOW() WHERE status='failed';`
+Core fields:
+- `status` (`pending`, `sending`, `sent`, `failed`)
+- `attempt_count`
+- `next_attempt_at`
+- `last_error`
+- `payload` JSONB with order + context
 
-- `SMTP Error: Could not connect to SMTP host` on Railway:
-  - This is a provider connectivity issue (common with SMTP from cloud containers).
-  - Use HTTPS provider transport (Resend API) instead of SMTP.
+## Worker behavior
+
+Script: `scripts/process_purchase_alert_queue.php`
+
+Algorithm:
+1. Claim due jobs with `FOR UPDATE SKIP LOCKED`.
+2. Move claimed jobs to `sending`.
+3. Send email via `MailHelper::sendPurchaseAlert()`.
+4. On success -> mark `sent` and set `sent_at`.
+5. On failure -> retry with exponential backoff.
+6. After max attempts -> mark `failed`.
+
+Supported args:
+- `--limit` (default `20`)
+- `--max-attempts` (default `6`)
+
+Recommended Railway command:
+
+```bash
+php -d variables_order=EGPCS scripts/process_purchase_alert_queue.php --limit=20 --max-attempts=6
+```
+
+## Queue stats script
+
+Run:
+
+```bash
+php scripts/purchase_alert_queue_stats.php
+```
+
+Returns JSON with:
+- pending/sending/failed/sent counts
+- oldest pending age seconds
+
+## Admin Dashboard Functional Responsibilities
+
+`frontend/src/pages/Dashboard/index.jsx` handles multiple responsibilities:
+
+1. Role-protected analytics UI
+- Uses `AdminRoute` to enforce admin-only access
+
+2. KPI and chart calculations
+- Revenue, orders, customers, books
+- period switching (`today`, `week`, `month`, `year`)
+- chart animation replay on period changes
+- viewport-triggered animation start for heavy sections
+
+3. Section navigation
+- in-page links for major sections
+- scroll offset handling for sticky headers
+
+4. Recent orders and low stock
+- all-users and admin-only recent order lists
+- deep links to order detail pages
+- low stock restock action with loading state
+
+5. Management center CRUD
+- customers (edit/delete, add disabled by product rule)
+- books (add/edit/delete)
+- categories (add/edit/delete)
+- authors (add/edit/delete)
+
+## Navbar And Shared UX Behavior
+
+`frontend/src/components/StoreNavbar.jsx`:
+- shared on major pages
+- responsive for phone/tablet/desktop
+- profile dropdown and logout modal
+- conditional admin quick links
+- optional reusable back button via props:
+- `backTo`
+- `backLabel`
+
+This component centralizes navigation consistency across screens.
+
+## Operational SQL Snippets
+
+## Inspect outbox recent rows
+
+```sql
+select id, order_number, status, attempt_count, created_at, sent_at, last_error
+from purchase_alert_outbox
+order by id desc
+limit 20;
+```
+
+## Requeue failed jobs after fixing config
+
+```sql
+update purchase_alert_outbox
+set status = 'pending',
+    next_attempt_at = now(),
+    updated_at = now()
+where status = 'failed';
+```
+
+## Quick queue health view
+
+```sql
+select
+  count(*) filter (where status = 'pending') as pending_count,
+  count(*) filter (where status = 'sending') as sending_count,
+  count(*) filter (where status = 'failed') as failed_count,
+  count(*) filter (where status = 'sent') as sent_count
+from purchase_alert_outbox;
+```
+
+## Deployment Notes (Railway + Supabase)
+
+- Supabase and Railway are DB/platform providers, not replacements for backend API code.
+- Backend and worker must point to the same DB if they share outbox.
+- If frontend is newer than backend, new endpoint calls (for example `/api/books/stock`) can fail with `404`.
+- Always deploy backend first when introducing new API routes.
+
+Recommended rollout order for API changes:
+1. Deploy backend.
+2. Run/verify required SQL migrations.
+3. Deploy frontend.
+4. Run smoke tests (login, cart, checkout, orders, admin dashboard, low stock restock).
+
+## Troubleshooting Guide
+
+## Auth and session
+
+Problem: repeated `401` on protected routes
+- Confirm `JWT_SECRET` consistency.
+- Confirm cookie settings for deployment model (`SameSite=None`, HTTPS).
+- Confirm frontend sends `credentials: include` (already done in `apiFetch`).
+
+Problem: admin page redirects to login/home unexpectedly
+- Check `GET /api/auth/profile` response role.
+- Verify `AdminRoute` role parsing and token validity.
+
+## API connectivity
+
+Problem: frontend hits wrong host
+- Verify `VITE_API_BASE_URL` in deployment.
+- In dev, note fallback is `http://localhost/Ecommerce/public`.
+
+Problem: route returns 404
+- Ensure backend deployment includes latest `routes/web.php` changes.
+- Verify path exactly matches expected endpoint.
+
+## Cart and checkout
+
+Problem: checkout slow
+- Ensure direct SMTP is not used in request path.
+- Verify outbox enqueue is working and worker handles send asynchronously.
+
+Problem: order detail not found for `ORD-...`
+- Ensure backend supports lookup by both internal id and `orderNumber`.
+- Ensure production backend is up to date.
+
+## Low stock restock
+
+Problem: out-of-stock books not visible
+- Confirm frontend filter uses `stock <= 10`.
+
+Problem: restock fails for some books
+- Confirm frontend calls `/api/books/stock`, not `/api/books/put`.
+- Confirm backend route/controller/repository changes are deployed.
+
+## Email queue and delivery
+
+Problem: rows stay pending
+- Worker may not be running or not on correct schedule.
+- Verify Railway cron service, schedule, and command.
+- Verify worker and API share DB credentials.
+
+Problem: repeated `SMTP Error: Could not connect to SMTP host`
+- Prefer Resend API transport using `RESEND_API_KEY`.
+- SMTP from cloud containers is often unreliable due network/provider restrictions.
+
+Problem: worker logs show no pending but DB shows pending
+- Usually worker points to a different database than the one inspected.
+- Compare connection env vars for API service, worker service, and SQL console.
+
+## Validation Checklist After Any Release
+
+1. Can customer login and stay authenticated?
+2. Can admin login and open dashboard?
+3. Can books load on homepage?
+4. Can cart add/update/remove work?
+5. Can checkout complete quickly?
+6. Does checkout response include `mail_status`?
+7. Do new outbox rows appear?
+8. Does worker process rows to `sent` or retry them?
+9. Can `/orders` and `/orders/:orderId` resolve recent orders?
+10. Can Low Stock show `0` stock books and restock them?
 
 ## Notes
 
-- Legacy login endpoints (`/api/customers/login`, `/api/admins/login`) still exist for backward compatibility.
-- Unified `/api/login` is the preferred frontend path.
-- Cart and orders are persisted in JSONB under user records, not separate normalized order tables.
+- Legacy endpoints are retained for compatibility.
+- Unified `/api/login` is preferred for frontend usage.
+- Current design intentionally prioritizes checkout reliability over synchronous email sending.
