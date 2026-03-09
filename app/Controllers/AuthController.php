@@ -284,9 +284,9 @@ class AuthController
             return;
         }
 
-        if (strlen($newPassword) < 8) {
+        if ($newPassword === '') {
             http_response_code(400);
-            echo json_encode(['error' => 'New password must be at least 8 characters']);
+            echo json_encode(['error' => 'New password is required']);
             return;
         }
 

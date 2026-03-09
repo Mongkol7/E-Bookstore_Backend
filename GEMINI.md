@@ -21,6 +21,7 @@ This project is a full-stack bookstore:
 
 Core domains:
 - Authentication and profiles
+- Password reset via email verification code (customer/admin)
 - Books, authors, categories
 - Cart and checkout
 - Orders and order details
@@ -58,6 +59,7 @@ Core domains:
 - `scripts/process_purchase_alert_queue.php`: cron worker that claims/sends/retries outbox jobs
 - `scripts/purchase_alert_queue_stats.php`: operational queue summary output
 - `database/purchase_alert_outbox.sql`: outbox table/index DDL
+- `database/password_reset_codes.sql`: password reset code table/index DDL
 - `database/supabase_performance.sql`: index/performance SQL helper set
 
 ### Frontend
@@ -72,6 +74,7 @@ Core domains:
 - `frontend/src/components/ProcessingOverlay.jsx`: loading overlay UI component
 - `frontend/src/components/Skeleton.jsx`: loading placeholders
 - `frontend/src/pages/...`: feature pages (Auth, Home, Cart, Checkout, Orders, Order detail, Product detail, Dashboard)
+  - Auth includes `ForgotPassword` flow page at `frontend/src/pages/Auth/ForgotPassword/index.jsx`
 
 ## Runtime Architecture
 
@@ -184,6 +187,8 @@ MAIL_FROM_ADDRESS=no-reply@example.com
 MAIL_FROM_NAME=E-Bookstore
 PURCHASE_ALERT_TO=owner@example.com
 PURCHASE_ALERT_SUBJECT_PREFIX=[New Purchase]
+PASSWORD_RESET_SUBJECT_PREFIX=[Password Reset]
+PASSWORD_RESET_CODE_TTL_MINUTES=15
 
 # Recommended provider transport
 RESEND_API_KEY=re_xxxxxxxxxxxxx
@@ -283,6 +288,8 @@ No direct SMTP send occurs in checkout request path.
 ## Auth and profile
 
 - `POST /api/login` (preferred unified login)
+- `POST /api/auth/password-reset/request`
+- `POST /api/auth/password-reset/confirm`
 - `GET /api/auth/profile`
 - `POST /api/logout`
 - `POST /api/customers/post` (customer signup)
@@ -315,6 +322,7 @@ Defined in `frontend/src/App.jsx`:
 - `/` Homepage
 - `/login`
 - `/signup`
+- `/forgot-password`
 - `/product/:bookId`
 - `/cart`
 - `/checkout`
@@ -342,6 +350,18 @@ Defined in `frontend/src/App.jsx`:
 5. Frontend stores token and redirects by role:
 - admin -> `/admin/dashboard`
 - customer -> `/`
+
+## Flow 2B: Forgot password and reset (customer/admin)
+
+1. User opens `/forgot-password`.
+2. User submits email -> frontend calls `POST /api/auth/password-reset/request`.
+3. Backend verifies payload, finds user across `customers` + `admins`.
+4. Backend invalidates prior unused reset codes for that user.
+5. Backend stores new 6-digit code hash in `password_reset_codes` with expiry.
+6. Backend sends verification code email through `MailHelper::sendPasswordResetCode()`.
+7. User enters code + new password -> frontend calls `POST /api/auth/password-reset/confirm`.
+8. Backend validates code (unexpired + hash match), updates password hash in corresponding table (`customers` or `admins`), marks active reset rows used.
+9. User logs in with new password via `/login`.
 
 ## Flow 3: Browse books and profile-aware nav
 
@@ -638,6 +658,27 @@ Problem: worker logs show no pending but DB shows pending
 - Usually worker points to a different database than the one inspected.
 - Compare connection env vars for API service, worker service, and SQL console.
 
+## Password reset
+
+Problem: frontend shows `Unable to process password reset request`
+- Check backend has latest reset endpoints in `routes/web.php` and `AuthController`.
+- Ensure DB table exists:
+  - `password_reset_codes`
+- Ensure mail env is valid for the running backend service:
+  - `MAIL_ENABLED=true`
+  - provider config (`MAIL_PROVIDER=resend` with `RESEND_API_KEY` + valid `MAIL_FROM_ADDRESS`, or working SMTP vars)
+- Inspect backend service logs for provider-level errors (auth rejected, sender not verified, timeout).
+
+Problem: code request succeeds but no email arrives
+- Check spam/junk mailbox.
+- Verify sender/domain is verified (especially for Resend).
+- Verify backend is not pointed at a different `.env` than expected.
+
+Problem: code always invalid/expired
+- Confirm user is entering latest code (new requests invalidate old ones).
+- Confirm system/server time is correct.
+- Confirm `PASSWORD_RESET_CODE_TTL_MINUTES` is not set too low.
+
 ## Validation Checklist After Any Release
 
 1. Can customer login and stay authenticated?
@@ -650,6 +691,7 @@ Problem: worker logs show no pending but DB shows pending
 8. Does worker process rows to `sent` or retry them?
 9. Can `/orders` and `/orders/:orderId` resolve recent orders?
 10. Can Low Stock show `0` stock books and restock them?
+11. Can `/forgot-password` send code and complete password reset for both customer and admin accounts?
 
 ## Notes
 
