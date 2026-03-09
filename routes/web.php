@@ -285,6 +285,22 @@ if ($request_path === '') {
         http_response_code(405);
         echo json_encode(['error' => 'Method Not Allowed']);
     }
+} elseif ($request_path === '/api/auth/password-reset/request') {
+    $controller = new AuthController();
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $controller->requestPasswordResetCode();
+    } else {
+        http_response_code(405);
+        echo json_encode(['error' => 'Method Not Allowed']);
+    }
+} elseif ($request_path === '/api/auth/password-reset/confirm') {
+    $controller = new AuthController();
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $controller->confirmPasswordReset();
+    } else {
+        http_response_code(405);
+        echo json_encode(['error' => 'Method Not Allowed']);
+    }
 } elseif ($request_path === '/api/auth/profile') {
     AuthMiddleware::authenticate();
     $controller = new AuthController();

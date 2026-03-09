@@ -6,6 +6,45 @@ use PHPMailer\PHPMailer\PHPMailer;
 
 class MailHelper
 {
+    public static function sendPasswordResetCode(
+        string $recipient,
+        string $code,
+        string $fullName = '',
+        int $expiresInMinutes = 15
+    ): void {
+        if (!self::envBool('MAIL_ENABLED', true)) {
+            throw new \RuntimeException('Mail sending is disabled');
+        }
+
+        $safeRecipient = trim($recipient);
+        if ($safeRecipient === '') {
+            throw new \RuntimeException('Recipient email is required');
+        }
+
+        $safeCode = trim($code);
+        if ($safeCode === '') {
+            throw new \RuntimeException('Reset code is required');
+        }
+
+        $subjectPrefix = self::envString('PASSWORD_RESET_SUBJECT_PREFIX', '[Password Reset]');
+        $subject = trim($subjectPrefix . ' Verification Code');
+        $ttl = max(5, $expiresInMinutes);
+
+        $htmlBody = self::buildPasswordResetHtmlBody($safeCode, $fullName, $ttl);
+        $textBody = self::buildPasswordResetTextBody($safeCode, $fullName, $ttl);
+
+        $provider = strtolower(self::envString('MAIL_PROVIDER', 'auto'));
+        if ($provider === 'auto') {
+            $provider = self::envString('RESEND_API_KEY') !== '' ? 'resend' : 'smtp';
+        }
+        if ($provider === 'resend') {
+            self::sendViaResend($safeRecipient, $subject, $htmlBody, $textBody);
+            return;
+        }
+
+        self::sendViaSmtp($safeRecipient, $subject, $htmlBody, $textBody);
+    }
+
     public static function sendPurchaseAlert(array $order, array $ctx): void
     {
         if (!self::envBool('MAIL_ENABLED', true)) {
@@ -302,6 +341,53 @@ class MailHelper
             '</td></tr></table>' .
             '</td></tr></table>' .
             '</body></html>';
+    }
+
+    private static function buildPasswordResetHtmlBody(string $code, string $fullName, int $ttlMinutes): string
+    {
+        $safeCode = htmlspecialchars($code, ENT_QUOTES, 'UTF-8');
+        $safeName = htmlspecialchars(trim($fullName), ENT_QUOTES, 'UTF-8');
+        $safeTtl = htmlspecialchars((string)$ttlMinutes, ENT_QUOTES, 'UTF-8');
+        $greeting = $safeName !== '' ? 'Hello ' . $safeName . ',' : 'Hello,';
+
+        return
+            '<!doctype html>' .
+            '<html><body style="margin:0;padding:0;background:#0b1220;font-family:Segoe UI,Arial,sans-serif;color:#e2e8f0;">' .
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0b1220;padding:24px 12px;">' .
+            '<tr><td align="center">' .
+            '<table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;background:#111827;border:1px solid #233147;border-radius:16px;overflow:hidden;">' .
+            '<tr><td style="padding:20px 22px;background:linear-gradient(90deg,#0f766e,#10b981);">' .
+            '<div style="font-size:20px;font-weight:700;color:#ecfeff;">&#x1F510; Password Reset Verification</div>' .
+            '<div style="margin-top:4px;font-size:13px;color:#ccfbf1;">Use this code to reset your E-Bookstore account password.</div>' .
+            '</td></tr>' .
+            '<tr><td style="padding:22px;">' .
+            '<p style="margin:0 0 12px 0;color:#cbd5e1;font-size:14px;">' . $greeting . '</p>' .
+            '<p style="margin:0 0 14px 0;color:#cbd5e1;font-size:14px;">Enter this verification code in the app:</p>' .
+            '<div style="margin:0 0 16px 0;padding:14px 16px;background:#0f172a;border:1px solid #334155;border-radius:12px;text-align:center;">' .
+            '<span style="display:inline-block;font-size:30px;line-height:1.2;font-weight:800;letter-spacing:8px;color:#34d399;">' . $safeCode . '</span>' .
+            '</div>' .
+            '<p style="margin:0 0 8px 0;color:#94a3b8;font-size:13px;">This code expires in <strong style="color:#e2e8f0;">' . $safeTtl . ' minutes</strong>.</p>' .
+            '<p style="margin:0;color:#94a3b8;font-size:12px;">If you did not request this, you can ignore this email.</p>' .
+            '</td></tr>' .
+            '</table>' .
+            '</td></tr></table>' .
+            '</body></html>';
+    }
+
+    private static function buildPasswordResetTextBody(string $code, string $fullName, int $ttlMinutes): string
+    {
+        $lines = [];
+        $lines[] = 'Password Reset Verification';
+        $lines[] = '';
+        if (trim($fullName) !== '') {
+            $lines[] = 'Hello ' . trim($fullName) . ',';
+            $lines[] = '';
+        }
+        $lines[] = 'Your verification code is: ' . $code;
+        $lines[] = 'This code expires in ' . $ttlMinutes . ' minutes.';
+        $lines[] = '';
+        $lines[] = 'If you did not request this, please ignore this email.';
+        return implode("\n", $lines);
     }
 
     private static function buildTextBody(
